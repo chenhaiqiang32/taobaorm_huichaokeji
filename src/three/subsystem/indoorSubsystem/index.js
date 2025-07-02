@@ -156,6 +156,9 @@ export class IndoorSubsystem extends CustomSystem {
   }
   onProgress(gltf, name) {
     const building = gltf.scene;
+
+    // 动画现在由全局动画管理器统一处理
+
     building.children[0].children.forEach((group) => {
       const obj = { group, uTime: { value: 1.0 } };
 
@@ -707,6 +710,8 @@ export class IndoorSubsystem extends CustomSystem {
   /**
    * 清理室内系统数据（用于室内切换时的清理）
    */
+  // 动画现在由全局动画管理器统一处理
+
   clearIndoorData() {
     console.log("清理室内系统数据");
 

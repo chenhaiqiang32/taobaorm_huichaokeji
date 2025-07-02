@@ -9,6 +9,7 @@ import { Orientation } from "./components/Orientation/Orientation";
 import { CrossSearch } from "./components/crossSearch";
 import { sceneChange } from "./components/dataProgress";
 import { GatherWarning } from "./components/gather/GatherWarning";
+import { globalAnimationManager } from "./loader";
 
 let rightMouseupTime = 0;
 let leftMouseupTime = 0;
@@ -110,6 +111,11 @@ export class Store3D extends CoreExtensions {
 
     this.onRenderQueue.set("elapsedTimeUpdate", (scope) =>
       shaderUpdateTime(scope.elapsedTime)
+    );
+
+    // 添加全局动画管理器更新
+    this.onRenderQueue.set("globalAnimationUpdate", () =>
+      globalAnimationManager.update()
     );
   }
 

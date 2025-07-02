@@ -40,52 +40,6 @@ import {
 import { Tooltip } from "../../components/Tooltip";
 import { SceneHint } from "../../components/SceneHint";
 
-// 动画管理器
-class AnimationManager {
-  constructor() {
-    this.mixer = null;
-    this.actions = new Map();
-    this.clock = new THREE.Clock();
-    this.isPlaying = false;
-  }
-
-  init(mixer) {
-    this.mixer = mixer;
-    this.clock.start();
-  }
-
-  addAction(name, action) {
-    if (action) {
-      this.actions.set(name, action);
-      action.setLoop(THREE.LoopRepeat);
-      action.clampWhenFinished = true;
-    }
-  }
-
-  play(name) {
-    const action = this.actions.get(name);
-    if (action) {
-      action.reset();
-      action.play();
-      this.isPlaying = true;
-    }
-  }
-
-  stop(name) {
-    const action = this.actions.get(name);
-    if (action) {
-      action.stop();
-      this.isPlaying = false;
-    }
-  }
-
-  update() {
-    if (this.mixer && this.isPlaying) {
-      this.mixer.update(this.clock.getDelta());
-    }
-  }
-}
-
 // 获取模型文件列表
 async function getModelFiles() {
   try {
@@ -167,9 +121,6 @@ export class Ground extends CustomSystem {
     this.modelGroup = new THREE.Group();
     this.scene.add(this.modelGroup);
     this.loadedModels = new Map();
-
-    // 初始化动画管理器
-    this.animationManager = new AnimationManager();
 
     // 初始化提示框
     this.tooltip = new Tooltip();
@@ -661,21 +612,7 @@ string} name
         this.setBuildingBoard(childs);
       });
     }
-    // 处理动画
-    if (gltf.animations && gltf.animations.length > 0) {
-      const mixer = new THREE.AnimationMixer(model);
-      this.animationManager.init(mixer);
-
-      gltf.animations.forEach((clip) => {
-        const action = mixer.clipAction(clip);
-        this.animationManager.addAction(clip.name, action);
-      });
-
-      // 自动播放第一个动画
-      if (gltf.animations.length > 0) {
-        this.animationManager.play(gltf.animations[0].name);
-      }
-    }
+    // 动画现在由全局动画管理器统一处理
 
     this._add(model);
   }
@@ -973,10 +910,7 @@ string} name
     this.eventClear.forEach((clear) => clear());
     this.eventClear = [];
   }
-  update() {
-    // 更新动画
-    this.animationManager.update();
-  }
+  // 动画现在由全局动画管理器统一处理
 
   /**
    * @param {THREE.Object3D} model

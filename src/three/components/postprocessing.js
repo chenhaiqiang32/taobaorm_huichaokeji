@@ -1,4 +1,4 @@
-import { Scene,Camera,WebGLRenderer,Object3D } from "three";
+import { Scene, Camera, WebGLRenderer, Object3D } from "three";
 import {
   EffectPass,
   SelectiveBloomEffect,
@@ -19,7 +19,7 @@ export class Postprocessing {
    * @param { Scene } scene
    * @param { Camera } camera
    */
-  constructor(renderer,scene,camera) {
+  constructor(renderer, scene, camera) {
     this.#renderer = renderer;
     this.#scene = scene;
     this.#camera = camera;
@@ -27,8 +27,8 @@ export class Postprocessing {
     this.#init();
   }
 
-  resize = (width,height) => {
-    this.composer.setSize(width,height,true);
+  resize = (width, height) => {
+    this.composer.setSize(width, height, true);
   };
 
   #init() {
@@ -43,16 +43,16 @@ export class Postprocessing {
   #initComposer() {
     // msaa anti-aliasing 多重采样抗锯齿
     const multisampling = this.#renderer.capabilities.maxSamples;
-    this.composer = new EffectComposer(this.#renderer,{ multisampling });
+    this.composer = new EffectComposer(this.#renderer, { multisampling });
   }
 
   #initRenderPass() {
-    this.renderPass = new RenderPass(this.#scene,this.#camera);
+    this.renderPass = new RenderPass(this.#scene, this.#camera);
     this.composer.addPass(this.renderPass);
   }
 
   #initBloomEffect() {
-    this.bloomEffect = new SelectiveBloomEffect(this.#scene,this.#camera,{
+    this.bloomEffect = new SelectiveBloomEffect(this.#scene, this.#camera, {
       blendFunction: BlendFunction.ADD,
       luminanceThreshold: 0.01,
       luminanceSmoothing: 0.6,
@@ -64,7 +64,7 @@ export class Postprocessing {
   }
 
   #initOutLineEffect1() {
-    this.outlineEffect1 = new OutlineEffect(this.#scene,this.#camera,{
+    this.outlineEffect1 = new OutlineEffect(this.#scene, this.#camera, {
       blendFunction: BlendFunction.ADD,
       edgeStrength: 3,
       pulseSpeed: 0,
@@ -77,7 +77,7 @@ export class Postprocessing {
   }
 
   #initOutLineEffect2() {
-    this.outlineEffect2 = new OutlineEffect(this.#scene,this.#camera,{
+    this.outlineEffect2 = new OutlineEffect(this.#scene, this.#camera, {
       blendFunction: BlendFunction.ADD,
       edgeStrength: 3,
       patternScale: 5,
@@ -101,13 +101,13 @@ export class Postprocessing {
       this.#camera,
       this.bloomEffect,
       this.outlineEffect1,
-      this.outlineEffect2,
-      this.hueSaturationEffect,
-      this.brightnessContrastEffect,
+      this.outlineEffect2
+      // this.hueSaturationEffect
+      // this.brightnessContrastEffect,
     );
     this.composer.addPass(effectPass);
   }
-  addBloom = obj => {
+  addBloom = (obj) => {
     const selection = this.bloomEffect.selection;
     if (obj instanceof Object3D) {
       selection.add(obj);
@@ -115,7 +115,7 @@ export class Postprocessing {
       obj.forEach(this.addBloom);
     }
   };
-  clearBloom = obj => {
+  clearBloom = (obj) => {
     const selection = this.bloomEffect.selection;
     if (obj instanceof Object3D) {
       selection.delete(obj);
@@ -123,42 +123,43 @@ export class Postprocessing {
       obj.forEach(this.clearBloom);
     }
   };
-  addOutline = (obj,channel = 1) => {
+  addOutline = (obj, channel = 1) => {
     let pass = channel === 1 ? this.outlineEffect1 : this.outlineEffect2;
     if (obj instanceof Object3D) {
-      obj.traverse(child => {
+      obj.traverse((child) => {
         if (child.isMesh) {
           pass.selection.add(child);
         }
       });
     } else if (Array.isArray(obj)) {
-      obj.forEach(child => this.addOutline(child,channel));
+      obj.forEach((child) => this.addOutline(child, channel));
     }
   };
-  clearOutline = (obj,channel = 1) => {
+  clearOutline = (obj, channel = 1) => {
     let pass = channel === 1 ? this.outlineEffect1 : this.outlineEffect2;
     if (obj instanceof Object3D) {
-      obj.traverse(child => {
+      obj.traverse((child) => {
         if (child.isMesh) {
           pass.selection.delete(child);
         }
       });
     } else if (Array.isArray(obj)) {
-      obj.forEach(child => this.clearOutline(child,channel));
+      obj.forEach((child) => this.clearOutline(child, channel));
     }
   };
-  setNoSelection = (obj) => { // 设置清除时候不处理外轮廓光
+  setNoSelection = (obj) => {
+    // 设置清除时候不处理外轮廓光
     this.noSelection.push(obj);
   };
-  clearNoSelection = () => { // 清空不清除的轮廓
+  clearNoSelection = () => {
+    // 清空不清除的轮廓
     this.noSelection = [];
   };
   clearOutlineAll(channel) {
     let pass = channel === 1 ? this.outlineEffect1 : this.outlineEffect2;
     pass.selection.set([]);
-    this.noSelection.forEach(child => {
+    this.noSelection.forEach((child) => {
       this.addOutline(child);
     });
-
   }
 }
