@@ -130,7 +130,7 @@ function handleModelAnimations(gltf, model) {
 
 // 处理材质流动动画
 function handleMaterialFlowAnimation(model) {
-  const speedX = -0.0012; // 流动速度，可以根据需要调整
+  const speedX = -0.0048; // 流动速度，可以根据需要调整
 
   model.traverse((child) => {
     if (child.isMesh && child.name && child.name.includes("move")) {
