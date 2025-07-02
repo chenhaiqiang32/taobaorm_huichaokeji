@@ -11,6 +11,8 @@ import {
   postBuildingId,
   web3dModelsGroup,
 } from "../../../message/postMessage";
+import { loadTexture } from "../../../utils/texture";
+import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
 import { SunnyTexture, Weather } from "../../components/weather";
 
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
@@ -123,6 +125,8 @@ export class Ground extends CustomSystem {
 
     this.tweenControl = core.tweenControl;
     this.scene.background = SunnyTexture;
+    // 设置环境贴图，确保在模型加载前可用
+    this.setHDRSky();
     this.onRenderQueue = core.onRenderQueue;
     this.controls = core.controls;
     this.baseCamera = core.baseCamera;
@@ -232,8 +236,7 @@ export class Ground extends CustomSystem {
 
     console.log("Creating Weather instance with this:", this);
     console.log("Ground scene:", this.scene);
-    this.weather = new Weather(this);
-    console.log("Weather instance created:", this.weather);
+    // console.log("Weather instance created:", this.weather);
 
     this.measureDistance = new MeasureDistance(this);
     this.measureArea = new MeasureArea(this);
@@ -455,7 +458,7 @@ export class Ground extends CustomSystem {
 
   onEnter() {
     // 北元版本 切换子场景时会重置composer饱和度亮度为白天的配置 切回主场景时需要重新更新原有设置
-    this.weather && this.weather.resetComposer(this.weather.lightingPattern);
+    // this.weather && this.weather.resetComposer(this.weather.lightingPattern);
 
     this.handleControls();
     EquipmentPlate.onLoad(this, this.core); // 设备系统
@@ -515,15 +518,13 @@ export class Ground extends CustomSystem {
   clearBuildingFence() {
     this.fencePlate.clearBuildingFence();
   }
-  changeWeather(param) {
-    this.weather.setWeather(param.type, param.level);
-  }
-  switchWeather(param) {
-    this.weather.switchWeather(param);
-  }
-  updateLightingPattern(param) {
-    this.weather.updateLightingPattern(param);
-  }
+  // this.weather && this.weather.setWeather(param.type, param.level);
+  // this.weather.switchWeather(param);
+  // this.weather.updateLightingPattern(param);
+  // if (this.weather) {
+  //   this.weather.setBoundingBox(weatherBox);
+  // }
+  // this.weather.resetComposer();
 
   /**历史轨迹指令 */
   historyTrackCommand(param) {
@@ -610,6 +611,9 @@ string} name
     if (this.core.scene !== this.scene) return;
     const model = gltf.scene;
 
+    // 处理模型材质
+    this.adjustModelMaterials(model);
+
     if (name === "内地形") {
       const { min, max } = getBoxCenter(model);
       this.altitude = min.y;
@@ -625,15 +629,15 @@ string} name
       this.groundMesh = model;
 
       // 更新天气范围
-      if (this.weather) {
-        // 创建一个比地面模型稍大的包围盒，确保天气效果覆盖整个场景
-        const padding = 100; // 添加一些边距
-        const weatherBox = new THREE.Box3(
-          new THREE.Vector3(min.x - padding, min.y, min.z - padding),
-          new THREE.Vector3(max.x + padding, max.y + 500, max.z + padding)
-        );
-        this.weather.setBoundingBox(weatherBox);
-      }
+      // if (this.weather) {
+      //   // 创建一个比地面模型稍大的包围盒，确保天气效果覆盖整个场景
+      //   const padding = 100; // 添加一些边距
+      //   const weatherBox = new THREE.Box3(
+      //     new THREE.Vector3(min.x - padding, min.y, min.z - padding),
+      //     new THREE.Vector3(max.x + padding, max.y + 500, max.z + padding)
+      //   );
+      //   this.weather.setBoundingBox(weatherBox);
+      // }
     }
     // 检查是否是建筑模型
     if (name === "室内模型外壳") {
@@ -674,6 +678,86 @@ string} name
     }
 
     this._add(model);
+  }
+
+  /**
+   * 调整模型材质属性
+   * @param {THREE.Object3D} model 模型对象
+   */
+  adjustModelMaterials(model) {
+    model.traverse((child) => {
+      if (child.isMesh && child.material) {
+        // 处理单个材质
+        if (Array.isArray(child.material)) {
+          child.material.forEach((material) => this.adjustMaterial(material));
+        } else {
+          this.adjustMaterial(child.material);
+        }
+      }
+    });
+  }
+
+  /**
+   * 调整单个材质属性
+   * @param {THREE.Material} material 材质对象
+   */
+  adjustMaterial(material) {
+    if (!material) return;
+
+    // 如果 roughness 为 0，设置为 0.2
+    if (material.roughness !== undefined && material.roughness === 0) {
+      material.roughness = 0.2;
+      console.log(
+        `调整材质 ${material.name || "unnamed"} 的 roughness: 0 -> 0.2`
+      );
+    }
+
+    // 如果 metalness 为 1，设置为 0.68 并添加环境贴图
+    if (material.metalness !== undefined && material.metalness === 1) {
+      material.metalness = 0.68;
+
+      // 为金属材质设置环境贴图;
+      // if (this.scene.environment) {
+      //   material.envMap = this.scene.environment;
+      //   material.envMapIntensity = 0.5; // 环境贴图强度
+      //   material.needsUpdate = true; // 确保材质更新
+      //   console.log(
+      //     `调整材质 ${
+      //       material.name || "unnamed"
+      //     } 的 metalness: 1 -> 0.68，并设置环境贴图`
+      //   );
+      // } else {
+      //   // 如果环境贴图还没准备好，标记这个材质稍后处理
+      //   this.pendingEnvMapMaterials = this.pendingEnvMapMaterials || [];
+      //   this.pendingEnvMapMaterials.push(material);
+      //   console.log(
+      //     `调整材质 ${
+      //       material.name || "unnamed"
+      //     } 的 metalness: 1 -> 0.68，环境贴图稍后设置`
+      //   );
+      // }
+    }
+  }
+
+  /**
+   * 处理待设置环境贴图的材质
+   */
+  processPendingEnvMapMaterials() {
+    if (
+      this.pendingEnvMapMaterials &&
+      this.pendingEnvMapMaterials.length > 0 &&
+      this.scene.environment
+    ) {
+      console.log(
+        `处理 ${this.pendingEnvMapMaterials.length} 个待设置环境贴图的材质`
+      );
+      this.pendingEnvMapMaterials.forEach((material) => {
+        material.envMap = this.scene.environment;
+        material.envMapIntensity = 2; // 设置微妙的强度
+        material.needsUpdate = true;
+      });
+      this.pendingEnvMapMaterials = [];
+    }
   }
 
   // 建筑材质克隆，用于独立每一栋建筑的材质
@@ -796,7 +880,7 @@ string} name
   }
 
   onLeave() {
-    this.weather.resetComposer();
+    // this.weather.resetComposer();
     this.hideAllBuildingLabel(); // 离开时隐藏所有建筑牌子
     this.resetControls();
     this.setCameraState(false);
@@ -1073,6 +1157,92 @@ string} name
     if (this.sceneHint) {
       this.sceneHint.destroy();
       this.sceneHint = null;
+    }
+  }
+
+  /**
+   * 设置地面广场天空为 HDR 贴图
+   */
+  setHDRSky() {
+    console.log("开始加载 HDR 天空贴图...");
+
+    const loader = new RGBELoader();
+    // 尝试不同的数据类型
+    loader.setDataType(THREE.FloatType);
+
+    loader.load(
+      "./bg.hdr",
+      (texture) => {
+        console.log("HDR 加载成功:", texture);
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.exposure = 2;
+        this.scene.background = texture;
+
+        // 创建环境贴图副本，设置微妙的强度
+        const envTexture = texture.clone();
+        envTexture.intensity = 2; // 设置非常微妙的环境贴图强度
+        this.scene.environment = envTexture;
+
+        console.log("天空贴图设置完成");
+
+        // 处理待设置环境贴图的材质
+        this.processPendingEnvMapMaterials();
+      },
+      // 加载进度回调
+      (progress) => {
+        if (progress.lengthComputable) {
+          console.log(
+            "HDR 加载进度:",
+            (progress.loaded / progress.total) * 100 + "%"
+          );
+        }
+      },
+      // 加载错误回调
+      (error) => {
+        console.error("HDR 加载失败:", error);
+        console.log("尝试使用备用方案...");
+
+        // 尝试使用 TextureLoader 加载
+        this.setFallbackSky();
+      }
+    );
+  }
+
+  /**
+   * 备用天空设置方案
+   */
+  setFallbackSky() {
+    try {
+      // 尝试使用普通的 TextureLoader 加载
+      const textureLoader = new THREE.TextureLoader();
+      textureLoader.load(
+        "./sunny2.hdr",
+        (texture) => {
+          console.log("备用方案加载成功");
+          texture.mapping = THREE.EquirectangularReflectionMapping;
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.exposure = 0.2;
+          this.scene.background = texture;
+
+          // 创建环境贴图副本，设置微妙的强度
+          const envTexture = texture.clone();
+          envTexture.intensity = 0.02; // 设置非常微妙的环境贴图强度
+          this.scene.environment = texture;
+        },
+        undefined,
+        (error) => {
+          console.error("备用方案也失败:", error);
+          // 最后使用默认的天空颜色
+          this.scene.background = new THREE.Color(0x87ceeb);
+          console.log("使用默认天空蓝色");
+        }
+      );
+    } catch (error) {
+      console.error("备用方案初始化失败:", error);
+      // 使用默认的天空颜色
+      this.scene.background = new THREE.Color(0x87ceeb);
+      console.log("使用默认天空蓝色");
     }
   }
 }
