@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>室内灯光修复测试</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      background: #1a1a1a;
+      color: white;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .controls {
+      background: #333;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .control-group {
+      margin-bottom: 15px;
+    }
+
+    label {
+      display: inline-block;
+      width: 150px;
+      margin-right: 10px;
+    }
+
+    button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+
+    button:hover {
+      background: #45a049;
+    }
+
+    button.danger {
+      background: #f44336;
+    }
+
+    button.danger:hover {
+      background: #da190b;
+    }
+
+    .status {
+      background: #444;
+      padding: 15px;
+      border-radius: 8px;
+      margin-top: 20px;
+    }
+
+    .log {
+      background: #000;
+      color: #0f0;
+      padding: 15px;
+      border-radius: 8px;
+      height: 200px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 12px;
+      margin-top: 20px;
+    }
+
+    #three-container {
+      width: 100%;
+      height: 600px;
+      border: 2px solid #666;
+      border-radius: 8px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>室内灯光修复测试</h1>
+
+    <div class="controls">
+      <h3>测试控制</h3>
+
+      <div class="control-group">
+        <label>建筑模型:</label>
+        <select id="buildingSelect">
+          <option value="AFS9512042_制冷">AFS9512042_制冷</option>
+          <option value="AFS9512043_制热">AFS9512043_制热</option>
+          <option value="AFS9512044_配电室">AFS9512044_配电室</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <button onclick="enterIndoor()">进入室内</button>
+        <button onclick="leaveIndoor()" class="danger">离开室内</button>
+        <button onclick="reloadScene()">重新加载场景</button>
+      </div>
+
+      <div class="control-group">
+        <button onclick="toggleLightHelpers()">切换灯光辅助器</button>
+        <button onclick="adjustBuildingSize()">调整建筑尺寸</button>
+        <button onclick="resetLights()">重置灯光</button>
+      </div>
+
+      <div class="control-group">
+        <label>主灯光强度:</label>
+        <input type="range" id="mainIntensity" min="0" max="3" step="0.1" value="1.4" onchange="updateMainIntensity()">
+        <span id="mainIntensityValue">1.4</span>
+      </div>
+
+      <div class="control-group">
+        <label>环境光强度:</label>
+        <input type="range" id="ambientIntensity" min="0" max="3" step="0.1" value="1.5"
+          onchange="updateAmbientIntensity()">
+        <span id="ambientIntensityValue">1.5</span>
+      </div>
+    </div>
+
+    <div class="status">
+      <h3>状态信息</h3>
+      <div id="statusInfo">等待操作...</div>
+    </div>
+
+    <div class="log">
+      <div id="logContent">控制台日志将显示在这里...</div>
+    </div>
+
+    <div id="three-container"></div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+    import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
+    import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+    // 全局变量
+    let scene, camera, renderer, controls;
+    let indoorSubsystem = null;
+    let currentBuilding = null;
+    let lights = null;
+    let lightHelpers = [];
+
+    // 初始化Three.js场景
+    function initScene () {
+      // 创建场景
+      scene = new THREE.Scene();
+
+      // 创建相机
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 10, 20);
+
+      // 创建渲染器
+      const container = document.getElementById('three-container');
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      // 创建控制器
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+
+      // 添加网格辅助器
+      const gridHelper = new THREE.GridHelper(50, 50);
+      scene.add(gridHelper);
+
+      // 添加坐标轴辅助器
+      const axesHelper = new THREE.AxesHelper(10);
+      scene.add(axesHelper);
+
+      log("场景初始化完成");
+    }
+
+    // 模拟室内子系统
+    class MockIndoorSubsystem {
+      constructor() {
+        this.scene = scene;
+        this.lights = null;
+        this.building = null;
+      }
+
+      // 创建和设置灯光
+      createAndSetupLights (building) {
+        if (!building) {
+          log("建筑对象未提供，无法创建和设置灯光");
+          return;
+        }
+
+        log("开始根据建筑包围盒创建和设置灯光...");
+
+        // 获取建筑包围盒
+        const box = new THREE.Box3().setFromObject(building);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const min = box.min;
+        const max = box.max;
+
+        log("建筑包围盒信息:", {
+          center: center,
+          size: size,
+          min: min,
+          max: max,
+        });
+
+        // 计算建筑尺寸
+        const buildingWidth = size.x;
+        const buildingHeight = size.y;
+        const buildingDepth = size.z;
+        const maxDimension = Math.max(buildingWidth, buildingHeight, buildingDepth);
+
+        // 创建环境光
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
+        this.scene.add(ambientLight);
+
+        // 创建主方向光
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.4);
+        directionalLight.shadow.camera.near = 1;
+        directionalLight.shadow.camera.far = 1000;
+        directionalLight.shadow.camera.right = 1000;
+        directionalLight.shadow.camera.left = -1000;
+        directionalLight.shadow.camera.top = 600;
+        directionalLight.shadow.camera.bottom = -600;
+        directionalLight.shadow.mapSize.width = Math.pow(2, 11);
+        directionalLight.shadow.mapSize.height = Math.pow(2, 11);
+        directionalLight.shadow.blurSamples = 8;
+        directionalLight.shadow.radius = 1.15;
+        directionalLight.shadow.bias = -0.0015;
+        directionalLight.castShadow = true;
+
+        this.scene.add(directionalLight);
+
+        // 创建辅助方向光
+        const auxiliaryLight = new THREE.DirectionalLight(0xffffff, 0.4);
+        this.scene.add(auxiliaryLight);
+
+        // 保存灯光引用
+        this.lights = {
+          ambient: ambientLight,
+          main: directionalLight,
+          auxiliary: auxiliaryLight,
+        };
+
+        // 根据建筑尺寸调整灯光位置
+        const mainLightDistance = maxDimension * 1.5;
+        const mainLightHeight = center.y + buildingHeight * 0.8;
+        const mainLightOffset = maxDimension * 0.8;
+
+        // 主方向光位置：建筑中心上方，稍微偏移
+        this.lights.main.position.set(
+          center.x - mainLightOffset * 0.5,
+          mainLightHeight,
+          center.z - mainLightOffset * 0.8
+        );
+
+        // 调整主方向光的目标点（建筑中心）
+        this.lights.main.target.position.copy(center);
+        this.lights.main.target.updateMatrixWorld();
+
+        // 调整主方向光的阴影相机参数
+        const shadowSize = maxDimension * 2;
+        this.lights.main.shadow.camera.left = -shadowSize;
+        this.lights.main.shadow.camera.right = shadowSize;
+        this.lights.main.shadow.camera.top = shadowSize;
+        this.lights.main.shadow.camera.bottom = -shadowSize;
+        this.lights.main.shadow.camera.near = 0.1;
+        this.lights.main.shadow.camera.far = maxDimension * 4;
+        this.lights.main.shadow.camera.updateProjectionMatrix();
+
+        // 调整辅助方向光位置
+        const auxiliaryLightDistance = maxDimension * 1.2;
+        this.lights.auxiliary.position.set(
+          center.x + auxiliaryLightDistance * 0.6,
+          center.y + buildingHeight * 0.6,
+          center.z + auxiliaryLightDistance * 0.4
+        );
+
+        // 调整辅助方向光的目标点
+        this.lights.auxiliary.target.position.copy(center);
+        this.lights.auxiliary.target.updateMatrixWorld();
+
+        // 根据建筑尺寸调整灯光强度
+        const buildingVolume = buildingWidth * buildingHeight * buildingDepth;
+        const volumeFactor = Math.min(buildingVolume / 1000000, 2.0);
+
+        this.lights.main.intensity = 1.4 * volumeFactor;
+        this.lights.auxiliary.intensity = 0.4 * volumeFactor;
+        this.lights.ambient.intensity = 1.5 * Math.min(volumeFactor, 1.5);
+
+        log("灯光创建和位置设置完成:", {
+          mainLight: this.lights.main.position,
+          auxiliaryLight: this.lights.auxiliary.position,
+          mainIntensity: this.lights.main.intensity,
+          auxiliaryIntensity: this.lights.auxiliary.intensity,
+          ambientIntensity: this.lights.ambient.intensity,
+        });
+
+        // 强制添加灯光辅助器用于调试
+        this.addLightHelpers();
+
+        // 检查灯光是否正确添加到场景
+        log("场景中的灯光数量:", this.scene.children.filter(child => child.isLight).length);
+        log("场景中的所有对象:", this.scene.children.map(child => child.type || child.constructor.name));
+      }
+
+      // 添加灯光辅助器
+      addLightHelpers () {
+        // 移除现有的辅助器
+        this.removeLightHelpers();
+
+        // 创建主方向光辅助器
+        this.mainLightHelper = new THREE.DirectionalLightHelper(
+          this.lights.main,
+          5
+        );
+        this.scene.add(this.mainLightHelper);
+
+        // 创建辅助方向光辅助器
+        this.auxiliaryLightHelper = new THREE.DirectionalLightHelper(
+          this.lights.auxiliary,
+          3
+        );
+        this.scene.add(this.auxiliaryLightHelper);
+
+        // 创建阴影相机辅助器
+        this.shadowCameraHelper = new THREE.CameraHelper(
+          this.lights.main.shadow.camera
+        );
+        this.scene.add(this.shadowCameraHelper);
+
+        log("灯光辅助器已添加（调试模式）");
+      }
+
+      // 移除灯光辅助器
+      removeLightHelpers () {
+        if (this.mainLightHelper) {
+          this.scene.remove(this.mainLightHelper);
+          this.mainLightHelper.dispose();
+          this.mainLightHelper = null;
+        }
+
+        if (this.auxiliaryLightHelper) {
+          this.scene.remove(this.auxiliaryLightHelper);
+          this.auxiliaryLightHelper.dispose();
+          this.auxiliaryLightHelper = null;
+        }
+
+        if (this.shadowCameraHelper) {
+          this.scene.remove(this.shadowCameraHelper);
+          this.shadowCameraHelper.dispose();
+          this.shadowCameraHelper = null;
+        }
+      }
+
+      // 移除室内灯光系统
+      removeIndoorLights () {
+        log("移除室内灯光系统...");
+
+        // 移除灯光辅助器
+        this.removeLightHelpers();
+
+        // 移除灯光
+        if (this.lights) {
+          if (this.lights.ambient) {
+            this.scene.remove(this.lights.ambient);
+            this.lights.ambient.dispose();
+          }
+          if (this.lights.main) {
+            this.scene.remove(this.lights.main);
+            this.lights.main.dispose();
+          }
+          if (this.lights.auxiliary) {
+            this.scene.remove(this.lights.auxiliary);
+            this.lights.auxiliary.dispose();
+          }
+          this.lights = null;
+        }
+
+        log("室内灯光系统移除完成");
+      }
+    }
+
+    // 加载建筑模型
+    async function loadBuilding (buildingName) {
+      const loader = new GLTFLoader();
+
+      try {
+        const gltf = await loader.loadAsync(`./models/inDoor/${buildingName}.glb`);
+        const building = gltf.scene;
+
+        // 处理模型
+        building.traverse((child) => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+
+        scene.add(building);
+        currentBuilding = building;
+
+        log(`建筑模型 ${buildingName} 加载成功`);
+        return building;
+      } catch (error) {
+        log(`建筑模型加载失败: ${error.message}`);
+        return null;
+      }
+    }
+
+    // 设置HDR天空
+    function setIndoorHDRSky () {
+      const loader = new RGBELoader();
+      loader.setDataType(THREE.FloatType);
+
+      loader.load(
+        "./bg.hdr",
+        (texture) => {
+          log("室内HDR加载成功");
+          texture.mapping = THREE.EquirectangularReflectionMapping;
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.exposure = 1.5;
+
+          scene.background = texture;
+          scene.environment = texture.clone();
+          scene.environment.intensity = 1.2;
+
+          log("室内金色HDR天空贴图设置完成");
+        },
+        (progress) => {
+          if (progress.lengthComputable) {
+            log(`室内HDR加载进度: ${(progress.loaded / progress.total) * 100}%`);
+          }
+        },
+        (error) => {
+          log(`室内HDR加载失败: ${error.message}`);
+          setDefaultIndoorSky();
+        }
+      );
+    }
+
+    // 默认天空
+    function setDefaultIndoorSky () {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1024;
+      canvas.height = 512;
+      const context = canvas.getContext("2d");
+
+      const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+      gradient.addColorStop(0, "#FFD700");
+      gradient.addColorStop(0.3, "#FFA500");
+      gradient.addColorStop(0.7, "#FF8C00");
+      gradient.addColorStop(1, "#FF4500");
+
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.mapping = THREE.EquirectangularReflectionMapping;
+      texture.colorSpace = THREE.SRGBColorSpace;
+
+      scene.background = texture;
+      scene.environment = texture.clone();
+      scene.environment.intensity = 0.8;
+
+      log("默认金色天空贴图设置完成");
+    }
+
+    // 日志函数
+    function log (...args) {
+      const logContent = document.getElementById('logContent');
+      const timestamp = new Date().toLocaleTimeString();
+      const message = `[${timestamp}] ${args.join(' ')}`;
+      logContent.innerHTML += message + '<br>';
+      logContent.scrollTop = logContent.scrollHeight;
+      console.log(...args);
+    }
+
+    // 更新状态信息
+    function updateStatus (message) {
+      document.getElementById('statusInfo').textContent = message;
+    }
+
+    // 进入室内
+    window.enterIndoor = async function () {
+      const buildingName = document.getElementById('buildingSelect').value;
+      updateStatus(`正在进入室内: ${buildingName}`);
+
+      // 清理现有场景
+      if (currentBuilding) {
+        scene.remove(currentBuilding);
+        currentBuilding = null;
+      }
+
+      // 创建室内子系统
+      indoorSubsystem = new MockIndoorSubsystem();
+
+      // 设置HDR天空
+      setIndoorHDRSky();
+
+      // 加载建筑模型
+      const building = await loadBuilding(buildingName);
+      if (building) {
+        // 创建和设置灯光
+        indoorSubsystem.createAndSetupLights(building);
+
+        // 调整相机位置
+        const box = new THREE.Box3().setFromObject(building);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+
+        camera.position.set(
+          center.x + size.x * 2,
+          center.y + size.y * 1.5,
+          center.z + size.z * 2
+        );
+        controls.target.copy(center);
+        controls.update();
+
+        updateStatus(`已进入室内: ${buildingName}`);
+      }
+    };
+
+    // 离开室内
+    window.leaveIndoor = function () {
+      updateStatus("正在离开室内");
+
+      if (indoorSubsystem) {
+        indoorSubsystem.removeIndoorLights();
+        indoorSubsystem = null;
+      }
+
+      if (currentBuilding) {
+        scene.remove(currentBuilding);
+        currentBuilding = null;
+      }
+
+      // 重置场景背景
+      scene.background = null;
+      scene.environment = null;
+
+      // 重置相机位置
+      camera.position.set(0, 10, 20);
+      controls.target.set(0, 0, 0);
+      controls.update();
+
+      updateStatus("已离开室内");
+    };
+
+    // 重新加载场景
+    window.reloadScene = function () {
+      updateStatus("重新加载场景");
+
+      // 清理场景
+      while (scene.children.length > 0) {
+        const child = scene.children[0];
+        scene.remove(child);
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) child.material.dispose();
+      }
+
+      // 重新初始化
+      initScene();
+      updateStatus("场景重新加载完成");
+    };
+
+    // 切换灯光辅助器
+    window.toggleLightHelpers = function () {
+      if (indoorSubsystem && indoorSubsystem.lights) {
+        if (indoorSubsystem.mainLightHelper) {
+          indoorSubsystem.removeLightHelpers();
+          log("灯光辅助器已隐藏");
+        } else {
+          indoorSubsystem.addLightHelpers();
+          log("灯光辅助器已显示");
+        }
+      } else {
+        log("没有可用的灯光系统");
+      }
+    };
+
+    // 调整建筑尺寸
+    window.adjustBuildingSize = function () {
+      if (currentBuilding) {
+        currentBuilding.scale.setScalar(Math.random() * 2 + 0.5);
+        log(`建筑尺寸已调整，缩放比例: ${currentBuilding.scale.x}`);
+
+        if (indoorSubsystem && indoorSubsystem.lights) {
+          indoorSubsystem.createAndSetupLights(currentBuilding);
+        }
+      }
+    };
+
+    // 重置灯光
+    window.resetLights = function () {
+      if (indoorSubsystem && currentBuilding) {
+        indoorSubsystem.createAndSetupLights(currentBuilding);
+        log("灯光已重置");
+      }
+    };
+
+    // 更新主灯光强度
+    window.updateMainIntensity = function () {
+      const value = parseFloat(document.getElementById('mainIntensity').value);
+      document.getElementById('mainIntensityValue').textContent = value;
+
+      if (indoorSubsystem && indoorSubsystem.lights) {
+        indoorSubsystem.lights.main.intensity = value;
+        log(`主灯光强度已更新: ${value}`);
+      }
+    };
+
+    // 更新环境光强度
+    window.updateAmbientIntensity = function () {
+      const value = parseFloat(document.getElementById('ambientIntensity').value);
+      document.getElementById('ambientIntensityValue').textContent = value;
+
+      if (indoorSubsystem && indoorSubsystem.lights) {
+        indoorSubsystem.lights.ambient.intensity = value;
+        log(`环境光强度已更新: ${value}`);
+      }
+    };
+
+    // 动画循环
+    function animate () {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    // 窗口大小调整
+    window.addEventListener('resize', () => {
+      const container = document.getElementById('three-container');
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+
+    // 初始化
+    initScene();
+    animate();
+    log("室内灯光修复测试页面已加载");
+  

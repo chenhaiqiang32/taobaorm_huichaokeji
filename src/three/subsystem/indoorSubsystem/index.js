@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import * as TWEEN from "three/examples/jsm/libs/tween.module";
+import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
 import { CustomSystem } from "../customSystem";
 import { loadGLTF } from "@/three/loader";
 import { getBoxCenter } from "../../../lib/box3Fun";
@@ -13,10 +14,6 @@ import { dynamicFade, fadeByTime } from "../../../shader";
 import { SceneHint } from "../../components/SceneHint";
 
 let rightMouseupTime = 0;
-
-const $center = new THREE.Vector3();
-const CAMERA_SPHERE = new THREE.Sphere($center, 1800);
-const CONTROLS_SPHERE = new THREE.Sphere($center, 900);
 
 /**@type {OrbitControls} */
 const controlsParameters = {
@@ -54,25 +51,23 @@ export class IndoorSubsystem extends CustomSystem {
 
     // 初始化场景提示
     this.sceneHint = new SceneHint();
-
-    this.initLight();
+    console.log("this.sceneHint", this);
   }
 
   onEnter(buildingName) {
-    // 进入室内时隐藏室外建筑牌子
     if (this.core.ground && this.core.ground.hideAllBuildingLabel) {
       this.core.ground.hideAllBuildingLabel();
     }
-    this.currentPoint = null; // 当前所指向的模型
-    EquipmentPlate.onLoad(this, this.core); // 设备系统
+    this.currentPoint = null;
+    EquipmentPlate.onLoad(this, this.core);
 
-    // 检查并重新初始化场景提示（如果被销毁了）
     if (!this.sceneHint) {
       this.sceneHint = new SceneHint();
     }
 
-    // 显示室内场景提示
     this.sceneHint.show("右键双击返回室外");
+
+    this.setIndoorHDRSky();
 
     let obj = {
       name: buildingName,
@@ -88,115 +83,78 @@ export class IndoorSubsystem extends CustomSystem {
     );
   }
 
-  limitCameraInSphere = () => {
-    this.camera.position.clampSphere(CAMERA_SPHERE);
-    this.controls.target.clampSphere(CONTROLS_SPHERE);
-
-    this.camera.position.y =
-      this.camera.position.y < CAMERA_SPHERE.center.y
-        ? CAMERA_SPHERE.center.y
-        : this.camera.position.y;
-    this.controls.target.y =
-      this.controls.target.y < CAMERA_SPHERE.center.y
-        ? CAMERA_SPHERE.center.y
-        : this.controls.target.y;
-  };
-
   createGround(center, min) {
     const ground = new SpecialGround(center, min);
+
+    // 设置地面接收阴影
+    ground.receiveShadow = true;
+    ground.castShadow = false; // 地面通常不投射阴影
+
+    // 设置地面材质的环境贴图
+    if (this.scene.environment && ground.material) {
+      this.setupIndoorMaterial(ground.material);
+    }
+
     this.scene.add(ground);
   }
 
-  /**
-   * 室内根据建筑包围盒大小确定相机视野限制范围
-   * @param {THREE.Object3D} object
-   */
-  handleControls(param) {
-    CAMERA_SPHERE.center.set(param.center.x, param.min.y, param.center.z);
-    CAMERA_SPHERE.radius = param.radius * 10;
-    CONTROLS_SPHERE.center.set(param.center.x, param.min.y, param.center.z);
-    CONTROLS_SPHERE.radius = param.radius * 5;
-
-    this.controls.addEventListener("change", this.limitCameraInSphere);
-
-    Reflect.ownKeys(controlsParameters).forEach((key) => {
-      this.controls.data[key] = this.controls[key];
-      this.controls[key] = controlsParameters[key];
-    });
-  }
-
   resetControls() {
-    this.controls.removeEventListener("change", this.limitCameraInSphere);
     Reflect.ownKeys(controlsParameters).forEach((key) => {
       this.controls[key] = this.controls.data[key];
     });
   }
 
   onChangeSystemCustom(state, floorName, buildingName) {
-    // 室外切换进入室内楼层，同个楼栋不同楼层切换，室内切换不同楼栋楼层
     if (state === "outToIn") {
       let a = this.onEnter(buildingName).then(() => {
-        // 需要等待楼层记载完毕，事件注册完毕，然后切换楼层
         this.changeFloor(floorName);
       });
     }
     if (state === "inToInSingle") {
-      // 同个楼栋进入不同楼层
       this.changeFloor(floorName);
     }
     if (state === "inToInOther") {
-      // 室内切换进入不同楼栋的不同楼层
-      // 使用公共清理方法替代 dispose
       this.clearIndoorData();
       this.onEnter(buildingName).then(() => {
-        // 需要等待楼层记载完毕，事件注册完毕，然后切换楼层
         this.changeFloor(floorName);
       });
     }
   }
   onProgress(gltf, name) {
     const building = gltf.scene;
-
-    // 动画现在由全局动画管理器统一处理
-
-    building.children[0].children.forEach((group) => {
-      const obj = { group, uTime: { value: 1.0 } };
-
-      group.traverse((child) => {
-        if (child.isMesh) {
-          this.modelProcessing(child, obj);
-          child.userData.parent = group.name;
-        }
-      });
-
-      // 定位楼层
-      if (group.name.indexOf("BDW") === -1) {
-        this.floors.push(group);
+    let group = building.children.find((child) => child.name === "equip");
+    this.building = group;
+    const obj = { group, uTime: { value: 1.0 } };
+    group.traverse((child) => {
+      if (child.isMesh) {
+        this.modelProcessing(child, obj);
+        child.userData.parent = group.name;
       }
-      this.buildingObject[group.name] = obj;
     });
-    building.name = name;
-    this.building = building;
+
+    if (group.name.indexOf("BDW") === -1) {
+      this.floors.push(group);
+    }
+    this.buildingObject[group.name] = obj;
     this.scene.add(building);
   }
   modelProcessing(child, obj) {
+    // 设置阴影属性
     child.castShadow = true;
     child.receiveShadow = true;
 
-    // 自身为透明的模型，一般为栏杆等
     if (child.material.transparent) {
       child.renderOrder = 3;
       child.material.depthWrite = true;
     }
 
-    // 子场景整个模型都需要做透明处理
-    child.material = child.material.clone(); // 解决模型材质公用问题
+    child.material = child.material.clone();
     child.material.transparent = true;
     child.material.metalness = 0.2;
     child.material.roughness = 0.8;
 
-    // 点击建筑某一楼层时，该楼层部分需要透明的部分比如围墙，屋顶等需要做消失特效的需要进行该处理步骤
-    // 此处筛选条件需要根据不同项目进行修改,具体命名和建模协商
+    this.setupIndoorMaterial(child.material);
+
     if (
       !child.name.includes("BDW") &&
       child.material.name.includes("建筑外壳")
@@ -212,10 +170,16 @@ export class IndoorSubsystem extends CustomSystem {
   onLoaded() {
     const param = getBoxCenter(this.building);
     this.createGround(param.center, param.min);
-    this.cameraMove(this.building).then(() => {
-      this.handleControls(param);
-    });
+
+    this.createAndSetupLights(this.building);
+
+    if (this.scene.environment) {
+      this.processIndoorEnvMapMaterials();
+    }
+
+    this.cameraMove(this.building);
     this.addEventListener();
+    this.changeFloor("equip");
   }
   cameraMove(group) {
     return new Promise((res, rej) => {
@@ -251,30 +215,20 @@ export class IndoorSubsystem extends CustomSystem {
     });
   }
 
-  /**
-   * 相机移动到楼层上方能看到楼层内部的位置
-   * @param {THREE.Object3D} group - 楼层组对象
-   * @returns {Promise} 移动完成的Promise
-   */
   cameraMoveToFloor(group) {
     return new Promise((res, rej) => {
       const { center, radius, min, max } = getBoxCenter(group);
 
-      // 计算楼层高度
       const floorHeight = max.y - min.y;
-
-      // 设置目标点为楼层中心
       const target = center.clone();
 
-      // 计算相机位置：楼层中心上方，距离为楼层高度的1.5倍，确保能看到楼层内部
       const cameraDistance = Math.max(floorHeight * 1.5, radius * 2);
       const position = new THREE.Vector3(
         center.x,
-        center.y + floorHeight + cameraDistance * 0.8, // 稍微偏上一点
-        center.z + cameraDistance * 0.6 // 稍微偏后一点，形成俯视角度
+        center.y + floorHeight + cameraDistance * 0.8,
+        center.z + cameraDistance * 0.6
       );
 
-      // 相机移动动画
       this.tweenControl.changeTo({
         start: this.camera.position,
         end: position,
@@ -288,7 +242,6 @@ export class IndoorSubsystem extends CustomSystem {
         },
       });
 
-      // 目标点移动动画
       this.tweenControl.changeTo({
         start: this.controls.target,
         end: target,
@@ -301,17 +254,17 @@ export class IndoorSubsystem extends CustomSystem {
   }
 
   onLeave() {
-    // 离开室内时显示室外建筑牌子
     if (this.core.ground && this.core.ground.showAllBuildingLabel) {
       this.core.ground.showAllBuildingLabel();
     }
-    console.log("离开子场景");
     this.resetControls();
 
-    // 隐藏场景提示
     if (this.sceneHint) {
       this.sceneHint.hide();
     }
+
+    this.clearIndoorHDR();
+    this.removeIndoorLights();
 
     this.dispose();
   }
@@ -322,7 +275,6 @@ export class IndoorSubsystem extends CustomSystem {
   }
   addRayDbClick() {
     let event = this.core.raycast("dblclick", this.floors, (intersects) => {
-      // 双击某一楼层
       if (intersects.length) {
         let target = intersects[0].object.userData.parent;
         this.changeFloor(target);
@@ -332,36 +284,31 @@ export class IndoorSubsystem extends CustomSystem {
     return event.clear;
   }
   disposeGatherOrSilent() {
-    // 清除室内预警数据
     let toDelete = [];
     for (let key in this.gatherOrSilentData) {
       toDelete.push(key);
     }
-    // 删除属性
     toDelete.forEach((key) => {
       delete this.gatherOrSilentData[key];
     });
-    this.gatherOrSilentData = {}; // 清除本地数据
+    this.gatherOrSilentData = {};
     this.disPoseGatherShader();
   }
   changeFloor(floor) {
-    console.log(floor, "floor");
-
-    // 检查建筑数据是否已加载完成
     if (!this.buildingObject || !this.buildingObject[floor]) {
       console.warn(`楼层 "${floor}" 的建筑数据尚未加载完成，请稍后再试`);
       return false;
     }
 
-    // 首次进行楼层切换
-    if (!this.endChangeFloor) return false; // 切换楼层没有结束
+    if (!this.endChangeFloor) return false;
     this.resetData();
     if (!this.currentFloor) {
       this.endChangeFloor = false;
       this.removeEventListener();
-      this.addPointerLister(); // 绑定人物和设备的变手
+      this.addPointerLister();
       this.addIndoorEvent();
-      !this.core.isFollowing() ? this.addRightDbClickReset() : null; // 跟踪状态不绑定右键双击事件,事件绑定在动画结束之后
+      // !this.core.isFollowing() ? this.addRightDbClickReset() : null;
+      !this.core.isFollowing() ? this.addRightDbClickQuit() : null;
       this.switchFloorAnimate(floor).then((res) => {
         if (
           window.configs.floorToName[this.buildingName + "_室内"] &&
@@ -369,25 +316,70 @@ export class IndoorSubsystem extends CustomSystem {
         ) {
           changeIndoor(
             window.configs.floorToName[this.buildingName + "_室内"][floor]
-          ); // 通知前端切换场景，前端推送设备数据
+          );
         }
-        super.updateOrientation(); // 更新聚合数据
+        super.updateOrientation();
         this.core.crossSearch.changeSceneSearch();
         this.endChangeFloor = true;
         this.gatherOrSilentShader();
 
-        // 更新提示信息为楼栋状态
-        if (this.sceneHint) {
-          this.sceneHint.updateMessage("右键双击显示楼栋");
-        }
-      }); // 切换楼层动画
-      this.buildingAnimate(floor); // 建筑动画
+        // if (this.sceneHint) {
+        //   this.sceneHint.updateMessage("右键双击显示楼栋");
+        // }
+      });
+      this.buildingAnimate(floor);
     }
-    // 同一楼层切换
-    if (this.currentFloor.name === floor) return;
+    if (this.currentFloor && this.currentFloor.name === floor) return;
 
-    // 不同楼层之间切换 前端触发 该情况下不重新绑定事件
     this.floorSwitchInner(floor);
+
+    // ----------------- 新增：楼层children射线检测与outline -----------------
+    if (this._indoorRaycastClearFns) {
+      this._indoorRaycastClearFns.forEach((fn) => fn());
+    }
+    const children = this.buildingObject[floor].group.children;
+    this._indoorRaycastClearFns = [];
+    // 鼠标移动高亮
+    const moveEvt = this.core.raycast("mousemove", children, (intersects) => {
+      if (intersects.length) {
+        this.core.postprocessing.clearOutlineAll(1);
+        this.core.postprocessing.addOutline(intersects[0].object, 1);
+      } else {
+        this.core.postprocessing.clearOutlineAll(1);
+      }
+    });
+    this._indoorRaycastClearFns.push(moveEvt.clear);
+
+    // 点击切换视角和蓝色轮廓
+    const clickEvt = this.core.raycast("click", children, (intersects) => {
+      if (intersects.length) {
+        const targetObj = intersects[0].object;
+        this.cameraMove(targetObj).then(() => {
+          children.forEach((obj) => {
+            if (obj === targetObj) {
+              this.core.postprocessing.addOutline(obj, 1); // 高亮
+            } else {
+              this.core.postprocessing.addOutline(obj, 2); // 蓝色轮廓
+            }
+          });
+        });
+      }
+    });
+    this._indoorRaycastClearFns.push(clickEvt.clear);
+
+    // 右键双击恢复
+    const rightEvt = this.rightDblClickListener(() => {
+      this._indoorRaycastClearFns.forEach((fn) => fn());
+      this._indoorRaycastClearFns = [];
+      this.core.postprocessing.clearOutlineAll(1);
+      this.core.postprocessing.clearOutlineAll(2);
+      // 恢复全部显示
+      children.forEach((obj) => (obj.visible = true));
+      // 视角复位
+      this.cameraMove(this.buildingObject[floor].group);
+    });
+    this._indoorRaycastClearFns.push(rightEvt);
+    // ----------------------------------------------------------
   }
   gatherOrSilentShader() {
     this.disPoseGatherShader();
@@ -424,7 +416,7 @@ export class IndoorSubsystem extends CustomSystem {
       (intersect) => intersect.object.visible
     );
     if (personInsertsVisible.length) {
-      this.core.clearSearch(); // 清除现有搜索条件
+      this.core.clearSearch();
       const object = personInsertsVisible[0].object;
       this.orientation.setSearchId(object.name);
       this.orientation.search();
@@ -436,8 +428,7 @@ export class IndoorSubsystem extends CustomSystem {
       (intersect) => intersect.object.visible
     );
     if (equipInsertsVisible.length) {
-      console.log(equipInsertsVisible[0], "点击设备牌子");
-      this.core.clearSearch(); // 清除现有搜索条件
+      this.core.clearSearch();
       let typeName = equipInsertsVisible[0].object.typeName;
       let id = equipInsertsVisible[0].object.name;
       EquipmentPlate.searchEquip(id, typeName);
@@ -462,7 +453,7 @@ export class IndoorSubsystem extends CustomSystem {
     let event = this.core.raycast("mousemove", this.floors, (intersects) => {
       if (intersects.length) {
         let target = intersects[0].object.userData.parent;
-        if (this.currentPoint === target) return; // move事件过滤
+        if (this.currentPoint === target) return;
         this.currentPoint = target;
         document.body.style.cursor = "pointer";
         this.core.postprocessing.clearOutlineAll(1);
@@ -479,22 +470,19 @@ export class IndoorSubsystem extends CustomSystem {
     this.eventClear.push(event.clear);
     return event.clear;
   }
-  // 右键双击重置建筑事件
   addRightDbClickReset() {
     const del = this.rightDblClickListener(() => {
       this.removeEventListener();
       this.cameraMove(this.building);
       this.addEventListener();
-      this.resetBuilding(); // 重置楼层时清除楼层所有人员 onComplete
+      this.resetBuilding();
       this.disPoseGatherShader();
     });
     this.eventClear.push(del);
   }
   setFloorGatherOrSilent(param) {
-    // 设置本地数据
     this.gatherOrSilentData[param.areaDataFloor] = param;
   }
-  // 右键双击重置退出子场景事件
   addRightDbClickQuit() {
     const del = this.rightDblClickListener(() => {
       this.core.changeSystem("ground");
@@ -515,7 +503,6 @@ export class IndoorSubsystem extends CustomSystem {
     return del;
   }
   switchFloorAnimate(target) {
-    // 添加安全检查
     if (
       !this.buildingObject ||
       !this.buildingObject[target] ||
@@ -529,10 +516,9 @@ export class IndoorSubsystem extends CustomSystem {
 
     const { min, max } = getBoxCenter(group);
     return new Promise((res, rej) => {
-      lightIndexUpdate(max.y, min.y); // 楼层外墙渐变动画
+      lightIndexUpdate(max.y, min.y);
 
-      this.currentFloor = group; // 当前楼层
-      // 使用新的相机移动方法，移动到楼层上方能看到楼层内部的位置
+      this.currentFloor = group;
       this.cameraMoveToFloor(group).then(() => {
         res({ sceneType: 0, originId: target });
       });
@@ -540,7 +526,6 @@ export class IndoorSubsystem extends CustomSystem {
   }
   // 楼层内部之间切换
   floorSwitchInner(target) {
-    // 添加安全检查
     if (
       !this.buildingObject ||
       !this.buildingObject[target] ||
@@ -551,17 +536,13 @@ export class IndoorSubsystem extends CustomSystem {
     }
 
     this.endChangeFloor = false;
-    // 不同楼层之间切换 前端触发 该情况下不重新绑定事件
     const group = this.buildingObject[target].group;
     const { min, max } = getBoxCenter(group);
-    // 扫光动画
     lightIndexReset();
     lightIndexUpdate(max.y, min.y);
 
-    // 重置上一楼层动画
     let lastFloor = this.currentFloor.name;
     this.buildingObject[lastFloor].uTime.value = 0.2;
-    // 开始当前楼层动画
     this.buildingObject[target].group.visible = true;
     this.buildingObject[target].uTime.value = 1;
     new TWEEN.Tween(this.buildingObject[lastFloor].uTime)
@@ -570,11 +551,9 @@ export class IndoorSubsystem extends CustomSystem {
       .onComplete(() => {
         this.buildingObject[lastFloor].group.visible = false;
       });
-    // 镜头动画 - 使用新的相机移动方法
-    this.currentFloor = group; // 当前楼层
+    this.currentFloor = group;
     this.cameraMoveToFloor(group).then(() => {
-      getPerson({ sceneType: 0, originId: target });
-      super.updateOrientation(); // 更新聚合数据
+      super.updateOrientation();
       this.core.crossSearch.changeSceneSearch();
       this.endChangeFloor = true;
     });
@@ -588,9 +567,7 @@ export class IndoorSubsystem extends CustomSystem {
     return new Promise((res, rej) => {
       Reflect.ownKeys(this.buildingObject).forEach((key) => {
         if (key === target) {
-          // 指向当前选定楼层
         } else {
-          // 其他楼层消失
           const t = new TWEEN.Tween(this.buildingObject[key].uTime)
             .to({ value: 0.0 }, 1000)
             .start()
@@ -603,15 +580,14 @@ export class IndoorSubsystem extends CustomSystem {
     });
   }
   resetBuilding() {
-    lightIndexUpdate(); // 楼层外墙恢复
-    //其余楼层恢复
+    lightIndexUpdate();
     Reflect.ownKeys(this.buildingObject).forEach((key) => {
       this.buildingObject[key].group.visible = true;
       const t = new TWEEN.Tween(this.buildingObject[key].uTime)
         .to({ value: 1 }, 1000)
         .start()
         .onComplete(() => {
-          this.currentFloor = null; // 清除楼层
+          this.currentFloor = null;
           this.resetData();
         });
     });
@@ -620,19 +596,20 @@ export class IndoorSubsystem extends CustomSystem {
     }
   }
   resetData() {
-    // 清除数据
     this.orientation.orientation3D.disposeClusterGroup();
     EquipmentPlate.disposeAll();
   }
 
   removeEventListener() {
+    if (this._indoorRaycastClearFns) {
+      this._indoorRaycastClearFns.forEach((fn) => fn());
+      this._indoorRaycastClearFns = [];
+    }
     this.eventClear.forEach((clear) => clear());
     this.eventClear = [];
     this.resetEffect();
   }
-
   dispose() {
-    // todo BDW 楼层清空
     this.currentFloor = null;
     this.buildingObject = {};
     this.removeEventListener();
@@ -640,108 +617,338 @@ export class IndoorSubsystem extends CustomSystem {
     this.scene.dispose();
     lightIndexUpdate();
 
-    // 清理场景提示资源
     if (this.sceneHint) {
       this.sceneHint.destroy();
       this.sceneHint = null;
     }
+
+    this.removeLightHelpers();
   }
-  // 限制镜头移动
-  cameraMoveLimit(center, size) {
-    // 创建一个空的Box3包围盒
-    const box = new THREE.Box3().setFromCenterAndSize(center, size);
 
-    const position = this.camera.position;
-    const target = this.controls.target;
-    const p_old = position.clone();
-    const t_old = target.clone();
+  /**
+   * 添加灯光辅助器（用于调试）
+   */
+  addLightHelpers() {
+    this.removeLightHelpers();
 
-    this.controls.addEventListener("change", (e) => {
-      if (box.containsPoint(position)) {
-        t_old.copy(target);
-        p_old.copy(position);
-      } else {
-        target.copy(t_old);
-        position.copy(p_old);
+    this.mainLightHelper = new THREE.DirectionalLightHelper(
+      this.lights.main,
+      5
+    );
+    this.scene.add(this.mainLightHelper);
+
+    this.auxiliaryLightHelper = new THREE.DirectionalLightHelper(
+      this.lights.auxiliary,
+      3
+    );
+    this.scene.add(this.auxiliaryLightHelper);
+
+    this.shadowCameraHelper = new THREE.CameraHelper(
+      this.lights.main.shadow.camera
+    );
+    this.scene.add(this.shadowCameraHelper);
+  }
+
+  /**
+   * 移除灯光辅助器
+   */
+  removeLightHelpers() {
+    if (this.mainLightHelper) {
+      this.scene.remove(this.mainLightHelper);
+      this.mainLightHelper.dispose();
+      this.mainLightHelper = null;
+    }
+
+    if (this.auxiliaryLightHelper) {
+      this.scene.remove(this.auxiliaryLightHelper);
+      this.auxiliaryLightHelper.dispose();
+      this.auxiliaryLightHelper = null;
+    }
+
+    if (this.shadowCameraHelper) {
+      this.scene.remove(this.shadowCameraHelper);
+      this.shadowCameraHelper.dispose();
+      this.shadowCameraHelper = null;
+    }
+  }
+
+  /**
+   * 设置室内金色HDR环境贴图和天空
+   */
+  setIndoorHDRSky() {
+    const loader = new RGBELoader();
+    loader.setDataType(THREE.FloatType);
+
+    loader.load(
+      "./bg.hdr",
+      (texture) => {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.exposure = 1.5;
+
+        this.scene.background = texture;
+
+        const envTexture = texture.clone();
+        envTexture.intensity = 1.2;
+        this.scene.environment = envTexture;
+
+        this.processIndoorEnvMapMaterials();
+      },
+
+      (error) => {
+        console.error("室内HDR加载失败:", error);
+        this.setFallbackIndoorHDR();
+      }
+    );
+  }
+
+  /**
+   * 备用HDR方案
+   */
+  setFallbackIndoorHDR() {
+    const loader = new RGBELoader();
+    loader.setDataType(THREE.FloatType);
+
+    loader.load(
+      "./bg.hdr",
+      (texture) => {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.exposure = 1.8;
+
+        this.scene.background = texture;
+
+        const envTexture = texture.clone();
+        envTexture.intensity = 1.0;
+        this.scene.environment = envTexture;
+
+        this.processIndoorEnvMapMaterials();
+      },
+
+      (error) => {
+        console.error("备用HDR也加载失败:", error);
+        this.setDefaultIndoorSky();
+      }
+    );
+  }
+
+  /**
+   * 默认室内天空方案
+   */
+  setDefaultIndoorSky() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1024;
+    canvas.height = 512;
+    const context = canvas.getContext("2d");
+
+    const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, "#FFD700");
+    gradient.addColorStop(0.3, "#FFA500");
+    gradient.addColorStop(0.7, "#FF8C00");
+    gradient.addColorStop(1, "#FF4500");
+
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.mapping = THREE.EquirectangularReflectionMapping;
+    texture.colorSpace = THREE.SRGBColorSpace;
+
+    this.scene.background = texture;
+
+    const envTexture = texture.clone();
+    envTexture.intensity = 0.8;
+    this.scene.environment = envTexture;
+  }
+
+  /**
+   * 处理室内环境贴图材质
+   */
+  processIndoorEnvMapMaterials() {
+    this.scene.traverse((object) => {
+      if (object.isMesh && object.material) {
+        if (Array.isArray(object.material)) {
+          object.material.forEach((material) => {
+            this.setupIndoorMaterial(material);
+          });
+        } else {
+          this.setupIndoorMaterial(object.material);
+        }
       }
     });
   }
 
   /**
-   * 根据建筑包围盒生成自适应光源
-   * @param {THREE.Object3D} object3d
+   * 设置室内材质的环境贴图
    */
-  initLight() {
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.5); // 线性SRG
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.4);
-    directionalLight.shadow.camera.near = 1;
-    directionalLight.shadow.camera.far = 1000;
-    directionalLight.shadow.camera.right = 1000;
-    directionalLight.shadow.camera.left = -1000;
-    directionalLight.shadow.camera.top = 600;
-    directionalLight.shadow.camera.bottom = -600;
-    directionalLight.shadow.mapSize.width = Math.pow(2, 11);
-    directionalLight.shadow.mapSize.height = Math.pow(2, 11);
-    directionalLight.shadow.blurSamples = 8;
+  setupIndoorMaterial(material) {
+    if (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) {
+      if (this.scene.environment) {
+        material.envMap = this.scene.environment;
+        material.envMapIntensity = 3.2;
+      } else {
+        material.envMapIntensity = 0;
+      }
+      material.needsUpdate = true;
+    }
+  }
 
-    directionalLight.shadow.radius = 1.15;
-    directionalLight.shadow.bias = -0.0015;
+  /**
+   * 清理室内HDR环境贴图
+   */
+  clearIndoorHDR() {
+    if (this.scene.background) {
+      this.scene.background.dispose();
+      this.scene.background = null;
+    }
 
-    directionalLight.position.set(-100, 300, -300);
-    directionalLight.castShadow = true;
+    if (this.scene.environment) {
+      this.scene.environment.dispose();
+      this.scene.environment = null;
+    }
 
-    this.ambientLight = ambientLight;
-    this._add(this.ambientLight);
-    const ch = new THREE.CameraHelper(directionalLight.shadow.camera);
-    const hp = new THREE.DirectionalLightHelper(directionalLight);
-    this.directionLight = directionalLight;
-    this._add(this.directionLight);
-
-    const dir2 = new THREE.DirectionalLight(0xcccccc, 0.3);
-    dir2.position.set(-150, 150, 0);
-    // this._add(dir2);
-
-    const dir3 = new THREE.DirectionalLight(0xffffff, 0.4);
-    dir3.position.set(150, 100, 0);
-
-    this._add(dir3);
+    this.scene.traverse((object) => {
+      if (object.isMesh && object.material) {
+        if (Array.isArray(object.material)) {
+          object.material.forEach((material) => {
+            if (material.envMap) {
+              material.envMap = null;
+              material.envMapIntensity = 0;
+              material.needsUpdate = true;
+            }
+          });
+        } else {
+          if (object.material.envMap) {
+            object.material.envMap = null;
+            object.material.envMapIntensity = 0;
+            object.material.needsUpdate = true;
+          }
+        }
+      }
+    });
   }
 
   /**
    * 清理室内系统数据（用于室内切换时的清理）
    */
-  // 动画现在由全局动画管理器统一处理
-
   clearIndoorData() {
-    console.log("清理室内系统数据");
-
-    // 移除事件监听器
     this.removeEventListener();
-
-    // 重置数据
     this.resetData();
-
-    // 清理预警数据
     this.disposeGatherOrSilent();
 
-    // 隐藏场景提示
     if (this.sceneHint) {
       this.sceneHint.hide();
     }
 
-    // 清理场景中的建筑对象
     if (this.building && this.building.parent) {
       this.building.parent.remove(this.building);
       this.building = null;
     }
 
-    // 重置建筑相关数据
     this.buildingObject = {};
     this.floors = [];
     this.currentFloor = null;
     this.endChangeFloor = true;
 
-    // 重置控制器
     this.resetControls();
+    this.clearIndoorHDR();
+    this.removeIndoorLights();
+  }
+
+  /**
+   * 根据建筑包围盒创建和设置灯光
+   * @param {THREE.Object3D} building - 建筑对象
+   */
+  createAndSetupLights(building) {
+    if (!building) {
+      console.warn("建筑对象未提供，无法创建和设置灯光");
+      return;
+    }
+
+    const box = new THREE.Box3().setFromObject(building);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const min = box.min;
+    const max = box.max;
+
+    const buildingWidth = size.x;
+    const buildingHeight = size.y;
+    const buildingDepth = size.z;
+    const maxDimension = Math.max(buildingWidth, buildingHeight, buildingDepth);
+
+    // 创建环境光
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1);
+    this.ambientLight = ambientLight;
+    this._add(this.ambientLight);
+
+    // 创建方向光，位置设置在包围盒最高点上方
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+
+    // 设置方向光位置在包围盒最高点上方
+    const lightHeight = max.y + maxDimension * 0.5; // 在最高点上方一定距离
+    directionalLight.position.set(center.x, lightHeight, center.z);
+
+    // 设置方向光朝向建筑中心，但稍微向下以覆盖地面
+    const targetPosition = center.clone();
+    targetPosition.y = min.y - 50; // 目标点稍微低于地面，确保覆盖地面
+    directionalLight.target.position.copy(targetPosition);
+    this._add(directionalLight.target);
+
+    // 配置方向光的阴影
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
+    directionalLight.shadow.camera.near = 0.1;
+    directionalLight.shadow.camera.far = lightHeight * 2;
+
+    // 设置阴影相机视锥体以覆盖整个建筑和地面
+    const shadowSize = maxDimension * 2; // 增大阴影覆盖范围
+    directionalLight.shadow.camera.left = -shadowSize;
+    directionalLight.shadow.camera.right = shadowSize;
+    directionalLight.shadow.camera.top = shadowSize;
+    directionalLight.shadow.camera.bottom = -shadowSize;
+
+    // 设置阴影偏移和模糊
+    directionalLight.shadow.bias = -0.0001;
+    directionalLight.shadow.normalBias = 0.02;
+    directionalLight.shadow.radius = 1.5;
+
+    this.directionLight = directionalLight;
+    this._add(this.directionLight);
+  }
+
+  /**
+   * 移除室内灯光系统
+   */
+  removeIndoorLights() {
+    this.removeLightHelpers();
+
+    if (this.lights) {
+      if (this.lights.ambient) {
+        this.scene.remove(this.lights.ambient);
+        this.lights.ambient.dispose();
+      }
+      if (this.lights.main) {
+        // 移除主方向光的目标点
+        if (this.lights.main.target) {
+          this.scene.remove(this.lights.main.target);
+        }
+        this.scene.remove(this.lights.main);
+        this.lights.main.dispose();
+      }
+      if (this.lights.auxiliary) {
+        // 移除辅助方向光的目标点
+        if (this.lights.auxiliary.target) {
+          this.scene.remove(this.lights.auxiliary.target);
+        }
+        this.scene.remove(this.lights.auxiliary);
+        this.lights.auxiliary.dispose();
+      }
+      this.lights = null;
+    }
+
+    this.ambientLight = null;
+    this.directionLight = null;
+    this.auxiliaryLight = null;
   }
 }

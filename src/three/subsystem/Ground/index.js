@@ -371,7 +371,8 @@ export class Ground extends CustomSystem {
             // 检查是否可以进入室内，如果可以则显示提示框
             const buildingName = intersectedMesh.userData.buildingName;
             if (
-              this.buildingNames.some((name) => buildingName.includes(name))
+              this.buildingNames.some((name) => buildingName.includes(name)) &&
+              this.tooltip
             ) {
               // 计算提示框位置（在建筑上方）
               const position = new THREE.Vector3();
@@ -387,7 +388,7 @@ export class Ground extends CustomSystem {
             this.postprocessing.addOutline(pickBuilding, 1);
           }
           // 隐藏提示框
-          this.tooltip.hide();
+          this.tooltip && this.tooltip.hide();
         }
       }
     );
@@ -733,7 +734,10 @@ string} name
       // 鼠标进入：显示提示框
       (css2d) => {
         if (
-          this.buildingNames.some((buildingName) => name.includes(buildingName))
+          this.buildingNames.some((buildingName) =>
+            name.includes(buildingName)
+          ) &&
+          this.tooltip
         ) {
           const position = css2d.position.clone();
           position.y += 5; // 在牌子稍微上方显示
@@ -828,9 +832,8 @@ string} name
     this.removeEventListener();
     document.body.style.cursor = "auto";
 
-    // 清理提示框
+    // 清理提示框 - 移除重复的 hide() 调用，因为 hideAllBuildingLabel() 已经处理了
     if (this.tooltip) {
-      this.tooltip.hide();
       this.tooltip.destroy();
       this.tooltip = null;
     }
@@ -1037,7 +1040,7 @@ string} name
     });
   }
   initLight() {
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.25); // 线性SRG
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.45); // 线性SRG
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1.55);
     directionalLight.shadow.camera.near = 1;
     directionalLight.shadow.camera.far = 3500;
@@ -1051,27 +1054,38 @@ string} name
 
     directionalLight.shadow.radius = 1.15;
     directionalLight.shadow.bias = -0.0015;
-    // directionalLight.shadow.radius = 1.1;
-    // directionalLight.shadow.bias = 0.01;
 
-    directionalLight.position.set(-800, 1300, 1000);
+    directionalLight.position.set(15, 48, -48);
     directionalLight.castShadow = true;
+
+    // 设置方向光的目标点（场景中心）
+    const lightTarget = new THREE.Object3D();
+    lightTarget.position.set(0, 0, 0);
+    directionalLight.target = lightTarget;
 
     this.ambientLight = ambientLight;
     this._add(this.ambientLight);
-    const ch = new THREE.CameraHelper(directionalLight.shadow.camera);
-    const hp = new THREE.DirectionalLightHelper(directionalLight);
+
     this.directionalLight = directionalLight;
     this._add(this.directionalLight);
+    this._add(lightTarget);
 
+    // 添加灯光辅助器（调试用）
+    const ch = new THREE.CameraHelper(directionalLight.shadow.camera);
+    const hp = new THREE.DirectionalLightHelper(directionalLight, 5);
+    // this._add(ch);
+    // this._add(hp);
+
+    // 创建额外的辅助灯光（可选）
     const dir2 = new THREE.DirectionalLight(0xcccccc, 0.3);
     dir2.position.set(-150, 150, 0);
     // this._add(dir2);
 
     const dir3 = new THREE.DirectionalLight(0xffffff, 0.4);
     dir3.position.set(150, 100, 0);
-
     // this._add(dir3);
+
+    console.log("地面系统灯光初始化完成");
   }
   showAllBuildingLabel() {
     Object.values(this.buildingNameLabelMap).forEach((child) => {

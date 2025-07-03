@@ -54,7 +54,7 @@ export class Tooltip {
   }
 
   show(position) {
-    if (!this.isVisible) {
+    if (!this.isVisible && this.css2dObject && this.element) {
       this.css2dObject.position.copy(position);
       this.css2dObject.visible = true;
       this.element.style.opacity = "1";
@@ -63,17 +63,19 @@ export class Tooltip {
   }
 
   hide() {
-    if (this.isVisible) {
+    if (this.isVisible && this.css2dObject) {
       this.element.style.opacity = "0";
       setTimeout(() => {
-        this.css2dObject.visible = false;
+        if (this.css2dObject) {
+          this.css2dObject.visible = false;
+        }
         this.isVisible = false;
       }, 200);
     }
   }
 
   updatePosition(position) {
-    if (this.isVisible) {
+    if (this.isVisible && this.css2dObject) {
       this.css2dObject.position.copy(position);
     }
   }

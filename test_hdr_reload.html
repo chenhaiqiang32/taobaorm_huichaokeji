@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HDR天空重新加载测试</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #000;
+    }
+
+    #container {
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: Arial, sans-serif;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+      max-width: 400px;
+    }
+
+    .controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      color: white;
+      font-family: Arial, sans-serif;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+    }
+
+    .controls button {
+      margin: 5px;
+      padding: 5px 10px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+
+    .controls button:hover {
+      background: #45a049;
+    }
+
+    .status {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      color: white;
+      font-family: Arial, sans-serif;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="container"></div>
+  <div class="info">
+    <h3>HDR天空重新加载测试</h3>
+    <p>当前状态: <span id="currentStatus">初始化中...</span></p>
+    <p>HDR背景: <span id="backgroundStatus">-</span></p>
+    <p>环境贴图: <span id="environmentStatus">-</span></p>
+    <p>材质环境贴图: <span id="materialStatus">-</span></p>
+  </div>
+  <div class="controls">
+    <h4>控制面板</h4>
+    <button onclick="simulateEnter()">模拟进入室内</button>
+    <button onclick="simulateLeave()">模拟离开室内</button>
+    <button onclick="clearHDR()">清理HDR</button>
+    <button onclick="reloadHDR()">重新加载HDR</button>
+    <button onclick="checkStatus()">检查状态</button>
+  </div>
+  <div class="status">
+    <p>日志: <span id="log">-</span></p>
+  </div>
+
+  <script type="module">
+    import * as THREE from './node_modules/three/build/three.module.js';
+    import { RGBELoader } from './node_modules/three/examples/jsm/loaders/RGBELoader.js';
+    import { OrbitControls } from './node_modules/three/examples/jsm/controls/OrbitControls.js';
+
+    // 全局变量
+    let scene, camera, renderer, controls;
+    let testObjects = [];
+    let hdrLoaded = false;
+
+    // 初始化场景
+    function init () {
+      // 创建场景
+      scene = new THREE.Scene();
+
+      // 创建相机
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 5, 10);
+
+      // 创建渲染器
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      document.getElementById('container').appendChild(renderer.domElement);
+
+      // 创建控制器
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+
+      // 创建测试对象
+      createTestObjects();
+
+      // 创建光源
+      createLights();
+
+      console.log("场景初始化完成");
+      updateStatus("场景初始化完成");
+    }
+
+    // 创建测试对象
+    function createTestObjects () {
+      // 创建一个球体来测试环境反射
+      const sphereGeometry = new THREE.SphereGeometry(2, 32, 32);
+      const sphereMaterial = new THREE.MeshPhysicalMaterial({
+        metalness: 0.9,
+        roughness: 0.1,
+        envMapIntensity: 1.0
+      });
+      const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+      sphere.position.set(-3, 0, 0);
+      scene.add(sphere);
+      testObjects.push(sphere);
+
+      // 创建一个立方体
+      const cubeGeometry = new THREE.BoxGeometry(2, 2, 2);
+      const cubeMaterial = new THREE.MeshPhysicalMaterial({
+        metalness: 0.3,
+        roughness: 0.7,
+        envMapIntensity: 0.8
+      });
+      const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+      cube.position.set(3, 0, 0);
+      scene.add(cube);
+      testObjects.push(cube);
+
+      // 创建一个平面作为地面
+      const planeGeometry = new THREE.PlaneGeometry(20, 20);
+      const planeMaterial = new THREE.MeshPhysicalMaterial({
+        metalness: 0.1,
+        roughness: 0.8,
+        envMapIntensity: 0.5
+      });
+      const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+      plane.rotation.x = -Math.PI / 2;
+      plane.position.y = -3;
+      scene.add(plane);
+      testObjects.push(plane);
+    }
+
+    // 创建光源
+    function createLights () {
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambientLight);
+
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+      directionalLight.position.set(10, 10, 5);
+      scene.add(directionalLight);
+    }
+
+    // 设置HDR天空
+    function setIndoorHDRSky () {
+      console.log("开始加载室内HDR天空贴图...");
+      updateStatus("开始加载HDR天空...");
+
+      const loader = new RGBELoader();
+      loader.setDataType(THREE.FloatType);
+
+      loader.load(
+        './public/bg.hdr',
+        (texture) => {
+          console.log("HDR加载成功:", texture);
+
+          texture.mapping = THREE.EquirectangularReflectionMapping;
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.exposure = 1.5;
+
+          scene.background = texture;
+
+          const envTexture = texture.clone();
+          envTexture.intensity = 1.2;
+          scene.environment = envTexture;
+
+          hdrLoaded = true;
+          console.log("HDR天空贴图设置完成");
+          updateStatus("HDR天空设置完成");
+          processEnvMapMaterials();
+        },
+        (progress) => {
+          if (progress.lengthComputable) {
+            const percent = (progress.loaded / progress.total) * 100;
+            updateStatus(`HDR加载进度: ${percent.toFixed(1)}%`);
+          }
+        },
+        (error) => {
+          console.error("HDR加载失败:", error);
+          updateStatus("HDR加载失败，使用默认天空");
+          setDefaultSky();
+        }
+      );
+    }
+
+    // 设置默认天空
+    function setDefaultSky () {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 512;
+      const context = canvas.getContext('2d');
+
+      const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+      gradient.addColorStop(0, '#FFD700');
+      gradient.addColorStop(0.3, '#FFA500');
+      gradient.addColorStop(0.7, '#FF8C00');
+      gradient.addColorStop(1, '#FF4500');
+
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.mapping = THREE.EquirectangularReflectionMapping;
+      texture.colorSpace = THREE.SRGBColorSpace;
+
+      scene.background = texture;
+
+      const envTexture = texture.clone();
+      envTexture.intensity = 0.8;
+      scene.environment = envTexture;
+
+      hdrLoaded = true;
+      console.log("默认天空贴图设置完成");
+      updateStatus("默认天空设置完成");
+      processEnvMapMaterials();
+    }
+
+    // 处理环境贴图材质
+    function processEnvMapMaterials () {
+      console.log("处理环境贴图材质...");
+      scene.traverse((object) => {
+        if (object.isMesh && object.material) {
+          if (Array.isArray(object.material)) {
+            object.material.forEach(material => {
+              setupMaterial(material);
+            });
+          } else {
+            setupMaterial(object.material);
+          }
+        }
+      });
+      updateStatus("环境贴图材质处理完成");
+    }
+
+    // 设置材质环境贴图
+    function setupMaterial (material) {
+      if (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) {
+        material.envMap = scene.environment;
+        material.envMapIntensity = 0.6;
+        material.needsUpdate = true;
+      }
+    }
+
+    // 清理HDR
+    function clearHDR () {
+      console.log("清理HDR环境贴图...");
+
+      if (scene.background) {
+        scene.background.dispose();
+        scene.background = null;
+      }
+
+      if (scene.environment) {
+        scene.environment.dispose();
+        scene.environment = null;
+      }
+
+      // 清理材质中的环境贴图引用
+      scene.traverse((object) => {
+        if (object.isMesh && object.material) {
+          if (Array.isArray(object.material)) {
+            object.material.forEach(material => {
+              if (material.envMap) {
+                material.envMap = null;
+                material.envMapIntensity = 0;
+                material.needsUpdate = true;
+              }
+            });
+          } else {
+            if (object.material.envMap) {
+              object.material.envMap = null;
+              object.material.envMapIntensity = 0;
+              object.material.needsUpdate = true;
+            }
+          }
+        }
+      });
+
+      hdrLoaded = false;
+      console.log("HDR环境贴图清理完成");
+      updateStatus("HDR环境贴图已清理");
+    }
+
+    // 更新状态显示
+    function updateStatus (message) {
+      document.getElementById('log').textContent = message;
+      console.log(message);
+    }
+
+    // 检查状态
+    function checkStatus () {
+      const backgroundStatus = scene.background ? "已设置" : "未设置";
+      const environmentStatus = scene.environment ? "已设置" : "未设置";
+      const materialStatus = hdrLoaded ? "已处理" : "未处理";
+
+      document.getElementById('backgroundStatus').textContent = backgroundStatus;
+      document.getElementById('environmentStatus').textContent = environmentStatus;
+      document.getElementById('materialStatus').textContent = materialStatus;
+
+      updateStatus(`状态检查完成 - 背景: ${backgroundStatus}, 环境: ${environmentStatus}, 材质: ${materialStatus}`);
+    }
+
+    // 模拟进入室内
+    function simulateEnter () {
+      console.log("模拟进入室内...");
+      updateStatus("模拟进入室内...");
+      setIndoorHDRSky();
+    }
+
+    // 模拟离开室内
+    function simulateLeave () {
+      console.log("模拟离开室内...");
+      updateStatus("模拟离开室内...");
+      clearHDR();
+    }
+
+    // 重新加载HDR
+    function reloadHDR () {
+      console.log("重新加载HDR...");
+      updateStatus("重新加载HDR...");
+      clearHDR();
+      setTimeout(() => {
+        setIndoorHDRSky();
+      }, 100);
+    }
+
+    // 暴露全局函数
+    window.simulateEnter = simulateEnter;
+    window.simulateLeave = simulateLeave;
+    window.clearHDR = clearHDR;
+    window.reloadHDR = reloadHDR;
+    window.checkStatus = checkStatus;
+
+    // 动画循环
+    function animate () {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    // 窗口大小调整
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // 初始化
+    init();
+    animate();
+
+    // 初始状态检查
+    setTimeout(() => {
+      checkStatus();
+    }, 1000);
+  </script>
+</body>
+
+</html>

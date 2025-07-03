@@ -9,7 +9,7 @@ import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 import { kdTree } from "./kdTree";
 
 class FlowLight extends THREE.Mesh {
-  constructor(vertices,config = {}) {
+  constructor(vertices, config = {}) {
     super();
 
     const _config = {};
@@ -19,26 +19,26 @@ class FlowLight extends THREE.Mesh {
     _config.segments = config.segments || 2;
 
     if (Array.isArray(vertices)) {
-      this.#createPath(vertices,_config);
+      this.#createPath(vertices, _config);
     }
     this.type = "FlowLight";
   }
 
-  #createPath(vertices,config) {
-    const up = new THREE.Vector3(0,1,0);
+  #createPath(vertices, config) {
+    const up = new THREE.Vector3(0, 1, 0);
     const pathPointList = new PathPointList();
-    pathPointList.set(vertices,0.5,10,up,false);
+    pathPointList.set(vertices, 0.5, 10, up, false);
 
     if (config.type === "line") {
       this.geometry = new PathGeometry();
-      this.geometry.update(pathPointList,{
+      this.geometry.update(pathPointList, {
         width: config.width,
         arrow: false,
         side: "both",
       });
     } else if (config.type === "tube") {
       this.geometry = new PathTubeGeometry();
-      this.geometry.update(pathPointList,{
+      this.geometry.update(pathPointList, {
         arrow: false,
         side: "both",
         radius: config.radius,
@@ -105,12 +105,16 @@ class FlowLight extends THREE.Mesh {
     });
   }
   update(elapseTime) {
-    this.material.uniforms && (this.material.uniforms.uElapseTime.value = elapseTime);
+    this.material.uniforms &&
+      (this.material.uniforms.uElapseTime.value = elapseTime);
   }
 } // 雨天，雪天，效果范围
 
 // 默认粒子范围
-const BOX = new THREE.Box3(new THREE.Vector3(-100,0,-100),new THREE.Vector3(100,100,100));
+const BOX = new THREE.Box3(
+  new THREE.Vector3(-100, 0, -100),
+  new THREE.Vector3(100, 100, 100)
+);
 
 class Rain extends THREE.Mesh {
   #time;
@@ -120,7 +124,7 @@ class Rain extends THREE.Mesh {
    * @param { THREE.Box3 } box 粒子范围
    * @param { { speed: number, count: number, size: number} } _config 粒子配置
    */
-  constructor(box = BOX,_config) {
+  constructor(box = BOX, _config) {
     super();
     this.#config = _config;
     this.#box = box;
@@ -138,7 +142,7 @@ class Rain extends THREE.Mesh {
       depthWrite: false,
     });
 
-    rainMaterial.onBeforeCompile = shader => {
+    rainMaterial.onBeforeCompile = (shader) => {
       const getFoot = `
         uniform float top;
         uniform float bottom;
@@ -201,13 +205,13 @@ class Rain extends THREE.Mesh {
       shader.vertexShader = shader.vertexShader.replace(
         "#include <common>",
 
-        getFoot,
+        getFoot
       );
 
       shader.vertexShader = shader.vertexShader.replace(
         "#include <begin_vertex>",
 
-        begin_vertex,
+        begin_vertex
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -221,7 +225,7 @@ class Rain extends THREE.Mesh {
 
        uniform vec3 uColor;
 
-       `,
+       `
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -253,11 +257,11 @@ class Rain extends THREE.Mesh {
 
        gl_FragColor = color;
 
-       `,
+       `
       );
 
       shader.uniforms.cameraPosition = {
-        value: new THREE.Vector3(0,200,0),
+        value: new THREE.Vector3(0, 200, 0),
       };
 
       shader.uniforms.top = {
@@ -309,7 +313,7 @@ class Rain extends THREE.Mesh {
         pos.z,
         pos.x + width,
         pos.y,
-        pos.z,
+        pos.z
       );
 
       normals.push(
@@ -324,33 +328,40 @@ class Rain extends THREE.Mesh {
         pos.z,
         pos.x,
         pos.y - height / 2,
-        pos.z,
+        pos.z
       );
 
-      uvs.push(1,1,0,1,0,0,1,0);
+      uvs.push(1, 1, 0, 1, 0, 0, 1, 0);
 
-      indices.push(i * 4 + 0,i * 4 + 1,i * 4 + 2,i * 4 + 0,i * 4 + 2,i * 4 + 3);
+      indices.push(
+        i * 4 + 0,
+        i * 4 + 1,
+        i * 4 + 2,
+        i * 4 + 0,
+        i * 4 + 2,
+        i * 4 + 3
+      );
     }
 
     geometry.setAttribute(
       "position",
 
-      new THREE.BufferAttribute(new Float32Array(vertices),3),
+      new THREE.BufferAttribute(new Float32Array(vertices), 3)
     );
 
     geometry.setAttribute(
       "normal",
 
-      new THREE.BufferAttribute(new Float32Array(normals),3),
+      new THREE.BufferAttribute(new Float32Array(normals), 3)
     );
 
     geometry.setAttribute(
       "uv",
 
-      new THREE.BufferAttribute(new Float32Array(uvs),2),
+      new THREE.BufferAttribute(new Float32Array(uvs), 2)
     );
 
-    geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices),1));
+    geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(indices), 1));
 
     return geometry;
   }
@@ -360,7 +371,7 @@ class Rain extends THREE.Mesh {
     this.material.dispose();
   }
 
-  update(deltaTime,cameraPosition) {
+  update(deltaTime, cameraPosition) {
     this.#time = (this.#time + deltaTime * this.#config.speed) % 1;
     if (this.material && "uniforms" in this.material) {
       this.material.uniforms.cameraPosition.value = cameraPosition;
@@ -377,7 +388,7 @@ class Snow extends THREE.Points {
    * @param { THREE.Box3 } box 粒子范围
    * @param { { speed: number, count: number, size: number} } _config 粒子配置
    */
-  constructor(box,_config) {
+  constructor(box, _config) {
     super();
     this.config = _config;
     this.box = box;
@@ -394,7 +405,7 @@ class Snow extends THREE.Points {
       depthWrite: false,
     });
 
-    material.onBeforeCompile = shader => {
+    material.onBeforeCompile = (shader) => {
       shader.uniforms.uColor = {
         value: new THREE.Color(0xffffff),
       };
@@ -404,7 +415,7 @@ class Snow extends THREE.Points {
         `
          #include <common>
          uniform vec3 uColor;
-         `,
+         `
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -415,7 +426,7 @@ class Snow extends THREE.Points {
                strength = 1.0 - strength;
                strength = pow(strength, 5.0);
                gl_FragColor = vec4(uColor, strength);
-         `,
+         `
       );
     };
     return material;
@@ -430,10 +441,17 @@ class Snow extends THREE.Points {
       positions[i] = Math.random() * (box.max.x - box.min.x) + box.min.x;
       positions[i + 1] = Math.random() * (box.max.y - box.min.y) + box.min.y;
       positions[i + 2] = Math.random() * (box.max.z - box.min.z) + box.min.z;
-      this.positionBackup.push(positions[i],positions[i + 1],positions[i + 2]);
+      this.positionBackup.push(
+        positions[i],
+        positions[i + 1],
+        positions[i + 2]
+      );
     }
 
-    geometry.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3)
+    );
     return geometry;
   }
 
@@ -469,14 +487,21 @@ class Lake {
    * @param {number} widthSegments
    * @param {number} heightSegments
    */
-  constructor(aabb,widthSegments,heightSegments) {
+  constructor(aabb, widthSegments, heightSegments) {
     const width = aabb.max.x - aabb.min.x;
     const height = aabb.max.z - aabb.min.z;
 
     // geometry
-    const geometry = new THREE.PlaneGeometry(width,height,widthSegments,heightSegments);
+    const geometry = new THREE.PlaneGeometry(
+      width,
+      height,
+      widthSegments,
+      heightSegments
+    );
     // options
-    const normal = new THREE.TextureLoader().load("./textures/water_normal.jpg");
+    const normal = new THREE.TextureLoader().load(
+      "./textures/water_normal.jpg"
+    );
     normal.wrapS = normal.wrapT = THREE.RepeatWrapping;
     const options = {
       textureWidth: 512,
@@ -488,7 +513,7 @@ class Lake {
       distortionScale: 0.6,
       size: 2,
     };
-    this.mesh = new Water(geometry,options);
+    this.mesh = new Water(geometry, options);
     this.mesh.rotation.x = -Math.PI / 2;
     const position = new THREE.Vector3();
     aabb.getCenter(position);
@@ -504,7 +529,7 @@ class Lake {
 class Smoke extends THREE.Points {
   #particles;
   time;
-  constructor(speed = new THREE.Vector3(0,1,0),size = 10) {
+  constructor(speed = new THREE.Vector3(0, 1, 0), size = 10) {
     super();
     this.#particles = [];
     this.time = 0;
@@ -516,7 +541,7 @@ class Smoke extends THREE.Points {
 
   update() {
     if (Date.now() - this.time > 1000) {
-      this.#particles.push(new Particle(this.speed,this.size));
+      this.#particles.push(new Particle(this.speed, this.size));
       this.time = Date.now();
     }
     this.smokeUpdate();
@@ -529,10 +554,22 @@ class Smoke extends THREE.Points {
     const texture = new THREE.TextureLoader().load("./textures/smoke.png");
     const geometry = new THREE.BufferGeometry();
     // 设置顶点数据
-    geometry.setAttribute("position",new THREE.BufferAttribute(new Float32Array([]),3));
-    geometry.setAttribute("a_opacity",new THREE.BufferAttribute(new Float32Array([]),1));
-    geometry.setAttribute("a_size",new THREE.BufferAttribute(new Float32Array([]),1));
-    geometry.setAttribute("a_scale",new THREE.BufferAttribute(new Float32Array([]),1));
+    geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array([]), 3)
+    );
+    geometry.setAttribute(
+      "a_opacity",
+      new THREE.BufferAttribute(new Float32Array([]), 1)
+    );
+    geometry.setAttribute(
+      "a_size",
+      new THREE.BufferAttribute(new Float32Array([]), 1)
+    );
+    geometry.setAttribute(
+      "a_scale",
+      new THREE.BufferAttribute(new Float32Array([]), 1)
+    );
     this.geometry = geometry;
     // material
     this.material = new THREE.PointsMaterial({
@@ -542,7 +579,7 @@ class Smoke extends THREE.Points {
       depthWrite: false,
     });
 
-    this.material.onBeforeCompile = shader => {
+    this.material.onBeforeCompile = (shader) => {
       shader.uniforms.uStyle = this.lightingPattern;
       shader.vertexShader = shader.vertexShader.replace(
         "#include <common>",
@@ -551,19 +588,19 @@ class Smoke extends THREE.Points {
      attribute float a_size;
      attribute float a_scale;
      varying float v_opacity;
-     #include <common>`,
+     #include <common>`
       );
       shader.vertexShader = shader.vertexShader.replace(
         "gl_PointSize = size;",
         `v_opacity = a_opacity;
-     gl_PointSize = a_size * a_scale;`,
+     gl_PointSize = a_size * a_scale;`
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <common>",
         `varying float v_opacity;
          uniform float uStyle;
-             #include <common>`,
+             #include <common>`
       );
       shader.fragmentShader = shader.fragmentShader.replace(
         "#include <premultiplied_alpha_fragment>",
@@ -575,13 +612,13 @@ class Smoke extends THREE.Points {
       //  }
       //  gl_FragColor = vec4( 0.2,0.3,0.4,gl_PointCoord.x );
 
-       `,
+       `
       );
     };
   }
 
   smokeUpdate() {
-    const particles = this.#particles.filter(particle => {
+    const particles = this.#particles.filter((particle) => {
       particle.update();
       return !(particle.updateTime - particle.createTime > particle.life);
     });
@@ -595,23 +632,35 @@ class Smoke extends THREE.Points {
     const scaleList = [];
     const sizeList = [];
 
-    particles.forEach(particle => {
-      const { x,y,z } = particle.position;
-      positionList.push(x,y,z);
+    particles.forEach((particle) => {
+      const { x, y, z } = particle.position;
+      positionList.push(x, y, z);
       opacityList.push(particle.opacity);
       scaleList.push(particle.scale);
       sizeList.push(particle.size);
     });
     // 粒子属性写入
-    this.geometry.setAttribute("position",new THREE.BufferAttribute(new Float32Array(positionList),3));
-    this.geometry.setAttribute("a_opacity",new THREE.BufferAttribute(new Float32Array(opacityList),1));
-    this.geometry.setAttribute("a_scale",new THREE.BufferAttribute(new Float32Array(scaleList),1));
-    this.geometry.setAttribute("a_size",new THREE.BufferAttribute(new Float32Array(sizeList),1));
+    this.geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(positionList), 3)
+    );
+    this.geometry.setAttribute(
+      "a_opacity",
+      new THREE.BufferAttribute(new Float32Array(opacityList), 1)
+    );
+    this.geometry.setAttribute(
+      "a_scale",
+      new THREE.BufferAttribute(new Float32Array(scaleList), 1)
+    );
+    this.geometry.setAttribute(
+      "a_size",
+      new THREE.BufferAttribute(new Float32Array(sizeList), 1)
+    );
   }
 }
 
 class Particle {
-  constructor(speed = new THREE.Vector3(0,1,0),size = 10) {
+  constructor(speed = new THREE.Vector3(0, 1, 0), size = 10) {
     this.position = new THREE.Vector3(); // 粒子位置
     this.life = 10000; // 粒子的存活时间，毫秒
     this.createTime = Date.now(); // 粒子创建时间
@@ -624,7 +673,8 @@ class Particle {
 
     // 粒子放大量，及放大系数
     this.scaleFactor = 2;
-    this.scale = 1 + (this.scaleFactor * (this.updateTime - this.createTime)) / this.life; // 初始1，到达生命周期时为3
+    this.scale =
+      1 + (this.scaleFactor * (this.updateTime - this.createTime)) / this.life; // 初始1，到达生命周期时为3
 
     // 粒子的扩散速度
     this.speed = speed;
@@ -662,11 +712,11 @@ class FatLine extends Line2 {
     super();
     this.geometry = new LineGeometry();
     this.material = new LineMaterial(parameters);
-    this.material.resolution.set(window.innerWidth,window.innerHeight);
+    this.material.resolution.set(window.innerWidth, window.innerHeight);
   }
 
-  onResize(innerWidth,innerHeight) {
-    this.material.resolution.set(innerWidth,innerHeight);
+  onResize(innerWidth, innerHeight) {
+    this.material.resolution.set(innerWidth, innerHeight);
   }
   /**
    * @param { number[] }
@@ -693,41 +743,46 @@ class FatLine extends Line2 {
 }
 
 class StarLink extends THREE.Points {
-  constructor(width = 100,height = 100,count = 1000) {
+  constructor(width = 100, height = 100, count = 1000) {
     super();
     this.points = [];
-    this.plane = new THREE.Mesh(new THREE.PlaneGeometry(width,height));
+    this.plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height));
 
     this.plane.rotation.x = -Math.PI / 2;
     this.plane.material.side = THREE.DoubleSide;
     this.plane.updateMatrixWorld();
 
-    this.createGeometry(width,height,count);
+    this.createGeometry(width, height, count);
     this.createMaterial();
 
-    function distance(a,b) {
+    function distance(a, b) {
       const dx = a.x - b.x;
       const dz = a.z - b.z;
       return Math.sqrt(dx * dx + dz * dz);
     }
 
-    this.tree = new kdTree(this.points,distance,["x","z"]);
+    this.tree = new kdTree(this.points, distance, ["x", "z"]);
     this.onmousemove = this.bindMousemove.bind(this);
   }
 
-  createGeometry(width,height,count) {
+  createGeometry(width, height, count) {
     for (let i = 0; i < count; i++) {
       const x = Math.random() * width - width / 2;
       const y = 0;
       const z = Math.random() * height - height / 2;
-      this.points.push(new THREE.Vector3(x,y,z));
+      this.points.push(new THREE.Vector3(x, y, z));
     }
     this.geometry.setFromPoints(this.points);
   }
   createMaterial() {
-    this.material = new THREE.PointsMaterial({ transparent: true,vertexColors: true,size: 1,alphaTest: 0.1 });
+    this.material = new THREE.PointsMaterial({
+      transparent: true,
+      vertexColors: true,
+      size: 1,
+      alphaTest: 0.1,
+    });
 
-    this.material.onBeforeCompile = shader => {
+    this.material.onBeforeCompile = (shader) => {
       shader.uniforms.uColor = {
         value: new THREE.Color(0xffffff),
       };
@@ -737,7 +792,7 @@ class StarLink extends THREE.Points {
         `
        #include <common>
        uniform vec3 uColor;
-       `,
+       `
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -757,7 +812,7 @@ class StarLink extends THREE.Points {
              strength = 0.5 - strength;
              strength = pow(strength, 1.0);
              gl_FragColor = vec4(uColor, strength*t);
-       `,
+       `
       );
     };
   }
@@ -765,86 +820,34 @@ class StarLink extends THREE.Points {
   bindMousemove(intersects) {
     if (intersects.length) {
       const point = intersects[0].point;
-      const nearest = this.tree.nearest(point,100,10);
+      const nearest = this.tree.nearest(point, 100, 10);
     }
   }
 }
 
 class SpecialGround extends THREE.Mesh {
   /**@param {THREE.Box3} aabb BoundingBox */
-  constructor(center,min) {
+  constructor(center, min) {
     super();
     const textureLoader = new THREE.TextureLoader();
     const uBg = textureLoader.load("/textures/bg.png");
-    this.elapsedTime = { value: 0 };
-    this.position.set(center.x,min.y - 20,center.z);
-    this.geometry = new THREE.PlaneGeometry(2000,2000);
+    this.position.set(center.x, min.y - 20, center.z);
+    this.geometry = new THREE.PlaneGeometry(2000, 2000);
     this.geometry.rotateX(-Math.PI / 2);
-    this.material = new THREE.ShaderMaterial({
+    // 使用 MeshStandardMaterial 以支持阴影
+    this.material = new THREE.MeshStandardMaterial({
       side: THREE.DoubleSide,
       transparent: true,
-      uniforms: {
-        uTime: this.elapsedTime,
-        uBg: {
-          value: uBg
-        },
-        uColor: {
-          value: new THREE.Color("#7b8593")
-        }
-      },
-      vertexShader: `
-        varying vec2 vUv;
-        void main(){
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-        }
-        `,
-      fragmentShader: `
-        uniform float uTime;
-        varying vec2 vUv;
-        uniform sampler2D uBg;
-        uniform vec3 uColor;
-        void main(){
-
-          vec4 uTex=texture2D(uBg, vUv);
-          vec3 col = vec3(uTex.r,uTex.g,uTex.b);
-          float colAlpha = uTex.a;
-          vec2 tUv=(vUv-.5)*2.; // 0点在中心的uv
-          float dis = length(tUv);
-          float al = 1.0 - dis;
-
-          vec3 finalCol =  mix(col , uColor, 1.0 - colAlpha);
-
-
-          gl_FragColor= vec4(finalCol,al) * 0.6;
-
-
-            // // create grid
-            // vec2 frac=fract(uv*88.);
-            // float vertical_lines=step(frac.x,.1);
-            // float horizontal_lines=step(frac.y,.1);
-            // float lines=vertical_lines+horizontal_lines;
-            // vec3 col=vec3(lines);
-
-            // // create circles
-            // float d=length(uv);
-            // d=sin(d*2.-uTime*.8)/40.;
-            // d=abs(d);
-            // d=pow(.005/d,.4);
-            // vec3 col1=vec3(0.69921875, 0.84765625, 0.84765625);
-            // vec3 col2=vec3(0.6, 0.3922, 0.9137);
-            // vec3 col3=mix(col1,col2,pow(length(uv),4.));
-            // col*=d*.2*col3;
-            // float a =(1.-length(uv))*0.4;
-            // gl_FragColor=vec4(col,a);
-
-        }
-        `,
+      opacity: 0.6,
+      color: new THREE.Color("#7b8593"),
+      map: uBg,
+      metalness: 0.1,
+      roughness: 0.8,
     });
   }
 
   update(core) {
-    this.elapsedTime.value = core.elapsedTime;
+    // 标准材质不需要更新时间
   }
 }
 
@@ -864,12 +867,12 @@ class HeatCircle extends THREE.Mesh {
    * @param {number} radius 热图半径
    * @param {1|2|3} level 热图热度
    */
-  constructor(center = ZeroVec3,radius = 1,level = 1) {
+  constructor(center = ZeroVec3, radius = 1, level = 1) {
     super();
 
     this.position.copy(center);
 
-    this.geometry = new THREE.PlaneGeometry(radius,radius,10,10);
+    this.geometry = new THREE.PlaneGeometry(radius, radius, 10, 10);
     this.geometry.applyMatrix4(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
 
     this.material = new THREE.ShaderMaterial({
@@ -961,14 +964,12 @@ class HeatCircle extends THREE.Mesh {
 }
 
 class HighlightCircle extends THREE.Mesh {
-
   constructor() {
     super();
 
     this.name = "高亮圆圈";
-    this.geometry = new THREE.PlaneGeometry(5,5,50,50);
+    this.geometry = new THREE.PlaneGeometry(5, 5, 50, 50);
     this.geometry.rotateX(-Math.PI / 2);
-
 
     this.elapsedTime = { value: 0 };
 
@@ -978,8 +979,8 @@ class HighlightCircle extends THREE.Mesh {
       uniforms: {
         uElapseTime: this.elapsedTime,
         uColor: {
-          value: new THREE.Color("#7b8593")
-        }
+          value: new THREE.Color("#7b8593"),
+        },
       },
       vertexShader: `
       varying vec2 st;
@@ -1018,13 +1019,21 @@ class HighlightCircle extends THREE.Mesh {
       }
       `,
     });
-
   }
 
   update(elapsedTime) {
     this.elapsedTime.value = elapsedTime;
   }
-
-
 }
-export { FlowLight,Rain,Snow,Lake,Smoke,FatLine,StarLink,SpecialGround,HeatCircle,HighlightCircle };
+export {
+  FlowLight,
+  Rain,
+  Snow,
+  Lake,
+  Smoke,
+  FatLine,
+  StarLink,
+  SpecialGround,
+  HeatCircle,
+  HighlightCircle,
+};
