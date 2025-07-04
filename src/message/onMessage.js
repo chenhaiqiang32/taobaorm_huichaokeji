@@ -113,6 +113,19 @@ export const onMessage = async () => {
           core.changeSystem(event.data.param);
           break;
         }
+        case "changeScene": {
+          if (event.data.param === "地面") {
+            core.changeSystem("ground");
+          } else {
+            const nameToType = {
+              制冷: "AFS9512042_制冷",
+              制热: "AFS9512043_制热",
+              配电: "AFS9512044_配电室",
+            };
+            core.changeSystem("indoorSubsystem", nameToType[event.data.param]);
+          }
+          break;
+        }
         case "setWanderState": {
           if (event.data.param) {
             core.beginWander();

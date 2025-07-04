@@ -174,6 +174,11 @@ export class Store3D extends CoreExtensions {
       console.log("当前已在室内系统，执行清理操作");
       // 使用公共清理方法
       this.indoorSubsystem.clearIndoorData();
+
+      // 重置相机位置到默认状态，避免位置冲突
+      this.camera.position.set(0, 10, 20);
+      this.controls.target.set(0, 0, 0);
+      this.controls.update();
     }
 
     // 切换到室内系统
@@ -230,7 +235,19 @@ export class Store3D extends CoreExtensions {
         // 对于室内系统，允许重新初始化
         if (systemType === "indoorSubsystem") {
           console.log("室内系统重新初始化");
-          // 不执行 onLeave，因为已经在 changeIndoor 中处理了清理
+          // 在室内到室内切换时，需要执行部分清理操作以确保相机和控制器状态正确
+          // 但不执行完整的 onLeave，因为数据清理已经在 changeIndoor 中处理
+          this.indoorSubsystem.resetControls();
+
+          // 清理渲染队列
+          if (this.onRenderQueue) {
+            this.onRenderQueue.delete("indoorSubsystem");
+          }
+
+          // 清理场景提示
+          if (this.indoorSubsystem.sceneHint) {
+            this.indoorSubsystem.sceneHint.hide();
+          }
         } else {
           return; // 其他系统相同则不处理
         }

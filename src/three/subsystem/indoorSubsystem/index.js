@@ -7,7 +7,7 @@ import { getBoxCenter } from "../../../lib/box3Fun";
 import { lightIndexUpdate, lightIndexReset } from "../../../shader/funs";
 import { createCSS2DObject } from "../../../lib/CSSObject";
 
-import { changeIndoor } from "../../../message/postMessage";
+import { changeIndoor, web3dSelectCode } from "../../../message/postMessage";
 import EquipmentPlate from "../../components/business/equipMentPlate";
 import { SunnyTexture } from "../../components/weather";
 import { SpecialGround } from "../../../lib/blMeshes";
@@ -60,6 +60,12 @@ export class IndoorSubsystem extends CustomSystem {
   }
 
   onEnter(buildingName) {
+    // 如果是重新进入室内，先确保状态被正确重置
+    if (this.building || this.buildingObject) {
+      console.log("重新进入室内，重置状态");
+      this.clearIndoorData();
+    }
+
     if (this.core.ground && this.core.ground.hideAllBuildingLabel) {
       this.core.ground.hideAllBuildingLabel();
     }
@@ -1072,6 +1078,11 @@ export class IndoorSubsystem extends CustomSystem {
         let targetObj = intersects[0].object;
         targetObj = this.getDeviceObject(targetObj);
         if (!targetObj) return;
+
+        // 发送设备选择消息
+        const deviceCode = targetObj.name.split("_")[0];
+        web3dSelectCode(deviceCode);
+
         // 拉近视角到当前点击设备
         this.cameraMove(targetObj).then(() => {
           children.forEach((obj) => {

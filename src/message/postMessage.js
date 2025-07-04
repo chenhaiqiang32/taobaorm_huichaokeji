@@ -116,3 +116,14 @@ export const web3dModelsGroup = (data) => {
     "*"
   );
 };
+
+export const web3dSelectCode = (id) => {
+  console.log("web3dSelectCode", id);
+  window.parent.postMessage(
+    {
+      cmd: "web3dSelectCode",
+      param: id, // 设备编号
+    },
+    "*"
+  );
+};

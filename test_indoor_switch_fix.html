@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>室内切换修复测试</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      background-color: #f0f0f0;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .test-section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+
+    .test-section h3 {
+      margin-top: 0;
+      color: #333;
+    }
+
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      margin: 5px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #0056b3;
+    }
+
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin: 10px 0;
+      padding: 10px;
+      border-radius: 4px;
+      background: #f8f9fa;
+      border-left: 4px solid #007bff;
+    }
+
+    .error {
+      border-left-color: #dc3545;
+      background: #f8d7da;
+    }
+
+    .success {
+      border-left-color: #28a745;
+      background: #d4edda;
+    }
+
+    #threejs-container {
+      width: 100%;
+      height: 500px;
+      border: 1px solid #ddd;
+      margin: 20px 0;
+    }
+
+    .log {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 10px;
+      max-height: 200px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 12px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>室内切换修复测试</h1>
+
+    <div class="test-section">
+      <h3>测试说明</h3>
+      <p>此测试用于验证室内到室内切换时的相机位置和资源清理问题是否已修复。</p>
+      <p><strong>测试步骤：</strong></p>
+      <ol>
+        <li>点击"初始化场景"按钮</li>
+        <li>点击"进入室内A"按钮</li>
+        <li>等待加载完成后，点击"切换到室内B"按钮</li>
+        <li>观察相机位置是否正确重置，以及是否有错误信息</li>
+        <li>重复切换几次，检查是否稳定</li>
+      </ol>
+    </div>
+
+    <div class="test-section">
+      <h3>控制面板</h3>
+      <button id="initBtn">初始化场景</button>
+      <button id="enterIndoorABtn">进入室内A</button>
+      <button id="enterIndoorBBtn">进入室内B</button>
+      <button id="switchToABtn">切换到室内A</button>
+      <button id="switchToBBtn">切换到室内B</button>
+      <button id="resetBtn">重置场景</button>
+    </div>
+
+    <div class="test-section">
+      <h3>状态信息</h3>
+      <div id="status" class="status">等待初始化...</div>
+    </div>
+
+    <div id="threejs-container"></div>
+
+    <div class="test-section">
+      <h3>日志输出</h3>
+      <div id="log" class="log"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.158.0/build/three.module.js';
+    import { OrbitControls } from 'https://unpkg.com/three@0.158.0/examples/jsm/controls/OrbitControls.js';
+
+    // 模拟配置
+    window.floorToName = {
+      "室内A": {
+        path: "inDoor/AFS9512042_制冷_室内",
+        floor: "equip"
+      },
+      "室内B": {
+        path: "inDoor/AFS9512043_制热_室内",
+        floor: "equip"
+      }
+    };
+
+    // 模拟 Store3D 类
+    class MockStore3D {
+      constructor() {
+        this.scene = new THREE.Scene();
+        this.camera = new THREE.PerspectiveCamera(75, 800 / 500, 0.1, 1000);
+        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+        this.currentSystem = null;
+        this.indoorSubsystem = null;
+        this.ground = null;
+        this.onRenderQueue = new Map();
+        this.sceneType = 1; // 0=室内, 1=室外
+
+        this.init();
+      }
+
+      init () {
+        this.renderer.setSize(800, 500);
+        document.getElementById('threejs-container').appendChild(this.renderer.domElement);
+
+        // 设置初始相机位置
+        this.camera.position.set(0, 10, 20);
+        this.controls.target.set(0, 0, 0);
+        this.controls.update();
+
+        // 创建地面系统
+        this.ground = {
+          hideAllBuildingLabel: () => console.log("隐藏建筑标签"),
+          showAllBuildingLabel: () => console.log("显示建筑标签")
+        };
+
+        // 创建室内子系统
+        this.indoorSubsystem = new MockIndoorSubsystem(this);
+
+        this.animate();
+      }
+
+      animate () {
+        requestAnimationFrame(() => this.animate());
+        this.renderer.render(this.scene, this.camera);
+      }
+
+      changeSystem (systemType, building = null) {
+        console.log(`切换系统: ${systemType}, 建筑: ${building}`);
+
+        if (this.currentSystem && this.currentSystem !== this.indoorSubsystem) {
+          this.currentSystem.onLeave();
+        }
+
+        this.currentSystem = this.indoorSubsystem;
+        this.sceneType = 0; // 室内
+
+        if (building) {
+          this.indoorSubsystem.onEnter(building);
+        }
+      }
+
+      changeIndoor (name) {
+        console.log(`切换到室内: ${name}`);
+
+        const buildingConfig = window.floorToName[name];
+        if (!buildingConfig) {
+          this.updateStatus(`未找到建筑 "${name}" 的配置信息`, 'error');
+          return;
+        }
+
+        const { path, floor } = buildingConfig;
+        const buildingName = path.replace("inDoor/", "").replace("_室内", "");
+
+        // 检查当前是否已经在室内系统
+        const isCurrentlyIndoor = this.currentSystem === this.indoorSubsystem;
+
+        if (isCurrentlyIndoor) {
+          console.log("当前已在室内系统，执行清理操作");
+          this.indoorSubsystem.clearIndoorData();
+
+          // 重置相机位置到默认状态，避免位置冲突
+          this.camera.position.set(0, 10, 20);
+          this.controls.target.set(0, 0, 0);
+          this.controls.update();
+        }
+
+        this.changeSystem("indoorSubsystem", buildingName);
+
+        // 模拟加载完成后切换楼层
+        setTimeout(() => {
+          this.indoorSubsystem.changeFloor(floor);
+          this.updateStatus(`已切换到室内: ${name}`, 'success');
+        }, 1000);
+      }
+
+      updateStatus (message, type = 'info') {
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = message;
+        statusEl.className = `status ${type}`;
+        this.log(message);
+      }
+
+      log (message) {
+        const logEl = document.getElementById('log');
+        const timestamp = new Date().toLocaleTimeString();
+        logEl.innerHTML += `[${timestamp}] ${message}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+    }
+
+    // 模拟室内子系统
+    class MockIndoorSubsystem {
+      constructor(core) {
+        this.core = core;
+        this.scene = core.scene;
+        this.camera = core.camera;
+        this.controls = core.controls;
+        this.building = null;
+        this.buildingObject = {};
+        this.currentFloor = null;
+        this.buildingName = null;
+        this.endChangeFloor = true;
+        this.floors = [];
+        this.deviceLabelsData = {};
+        this.sceneHint = null;
+        this.ground = null;
+        this.boxModelGround = null;
+        this.eventClear = [];
+      }
+
+      onEnter (buildingName) {
+        // 如果是重新进入室内，先确保状态被正确重置
+        if (this.building || Object.keys(this.buildingObject).length > 0) {
+          console.log("重新进入室内，重置状态");
+          this.clearIndoorData();
+        }
+
+        this.buildingName = buildingName;
+        this.core.log(`进入室内: ${buildingName}`);
+
+        // 模拟加载建筑
+        return this.loadMockBuilding(buildingName);
+      }
+
+      loadMockBuilding (buildingName) {
+        return new Promise((resolve) => {
+          setTimeout(() => {
+            // 创建模拟建筑
+            const geometry = new THREE.BoxGeometry(10, 5, 10);
+            const material = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+            const building = new THREE.Mesh(geometry, material);
+            building.name = buildingName;
+
+            // 创建楼层组
+            const floorGroup = new THREE.Group();
+            floorGroup.name = "equip";
+            floorGroup.add(building);
+
+            this.building = floorGroup;
+            this.buildingObject["equip"] = {
+              group: floorGroup,
+              uTime: { value: 1.0 }
+            };
+            this.floors.push(floorGroup);
+
+            this.scene.add(floorGroup);
+
+            this.onLoaded();
+            resolve();
+          }, 500);
+        });
+      }
+
+      onLoaded () {
+        this.core.log("建筑加载完成");
+        this.cameraMove(this.building);
+        this.changeFloor("equip");
+      }
+
+      cameraMove (group) {
+        return new Promise((resolve) => {
+          const box = new THREE.Box3().setFromObject(group);
+          const center = box.getCenter(new THREE.Vector3());
+          const size = box.getSize(new THREE.Vector3());
+
+          const target = center;
+          const position = new THREE.Vector3(
+            center.x + size.x * 2,
+            center.y + size.y * 1.5,
+            center.z + size.z * 2
+          );
+
+          this.camera.position.copy(position);
+          this.controls.target.copy(target);
+          this.controls.update();
+
+          this.core.log(`相机移动到: ${position.toArray()}`);
+          resolve();
+        });
+      }
+
+      changeFloor (floor) {
+        if (!this.buildingObject[floor]) {
+          this.core.log(`楼层 "${floor}" 不存在`);
+          return false;
+        }
+
+        this.currentFloor = this.buildingObject[floor].group;
+        this.core.log(`切换到楼层: ${floor}`);
+
+        // 模拟楼层切换动画
+        this.cameraMoveToFloor(this.currentFloor);
+      }
+
+      cameraMoveToFloor (group) {
+        return new Promise((resolve) => {
+          const box = new THREE.Box3().setFromObject(group);
+          const center = box.getCenter(new THREE.Vector3());
+          const size = box.getSize(new THREE.Vector3());
+
+          const target = center;
+          const position = new THREE.Vector3(
+            center.x + size.x * 1.5,
+            center.y + size.y * 1.2,
+            center.z + size.z * 1.5
+          );
+
+          this.camera.position.copy(position);
+          this.controls.target.copy(target);
+          this.controls.update();
+
+          this.core.log(`相机移动到楼层: ${position.toArray()}`);
+          resolve();
+        });
+      }
+
+      clearIndoorData () {
+        this.core.log("清理室内数据");
+
+        // 清理建筑
+        if (this.building && this.building.parent) {
+          this.building.parent.remove(this.building);
+          this.building = null;
+        }
+
+        // 清理数据
+        this.buildingObject = {};
+        this.floors = [];
+        this.currentFloor = null;
+        this.endChangeFloor = true;
+        this.deviceLabelsData = {};
+
+        // 清理渲染队列
+        if (this.core.onRenderQueue) {
+          this.core.onRenderQueue.delete("indoorSubsystem");
+        }
+      }
+
+      onLeave () {
+        this.core.log("离开室内系统");
+        this.clearIndoorData();
+      }
+
+      resetControls () {
+        this.core.log("重置控制器");
+      }
+    }
+
+    // 初始化
+    let store3d = null;
+
+    document.getElementById('initBtn').addEventListener('click', () => {
+      if (store3d) {
+        store3d.renderer.dispose();
+        document.getElementById('threejs-container').innerHTML = '';
+      }
+
+      store3d = new MockStore3D();
+      store3d.updateStatus("场景已初始化", 'success');
+    });
+
+    document.getElementById('enterIndoorABtn').addEventListener('click', () => {
+      if (!store3d) {
+        store3d.updateStatus("请先初始化场景", 'error');
+        return;
+      }
+      store3d.changeIndoor("室内A");
+    });
+
+    document.getElementById('enterIndoorBBtn').addEventListener('click', () => {
+      if (!store3d) {
+        store3d.updateStatus("请先初始化场景", 'error');
+        return;
+      }
+      store3d.changeIndoor("室内B");
+    });
+
+    document.getElementById('switchToABtn').addEventListener('click', () => {
+      if (!store3d) {
+        store3d.updateStatus("请先初始化场景", 'error');
+        return;
+      }
+      store3d.changeIndoor("室内A");
+    });
+
+    document.getElementById('switchToBBtn').addEventListener('click', () => {
+      if (!store3d) {
+        store3d.updateStatus("请先初始化场景", 'error');
+        return;
+      }
+      store3d.changeIndoor("室内B");
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      if (store3d) {
+        store3d.camera.position.set(0, 10, 20);
+        store3d.controls.target.set(0, 0, 0);
+        store3d.controls.update();
+        store3d.updateStatus("场景已重置", 'success');
+      }
+    });
+
+    // 自动初始化
+    window.addEventListener('load', () => {
+      store3d = new MockStore3D();
+      store3d.updateStatus("场景已自动初始化", 'success');
+    });
+  </script>
+</body>
+
+</html>
