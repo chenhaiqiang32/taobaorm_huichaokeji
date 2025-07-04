@@ -48,7 +48,7 @@ export class Store3D extends CoreExtensions {
     this.camera.position.copy(__position);
     this.controls.target.copy(Store3D.Default.target);
 
-    this.controls.minDistance = 10;
+    this.controls.minDistance = 0;
   }
 
   setIndoorModel(state) {

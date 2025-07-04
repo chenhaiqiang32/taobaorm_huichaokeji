@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Update Model 测试</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      background: #1a1a1a;
+      color: white;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .test-section {
+      margin-bottom: 30px;
+      padding: 20px;
+      background: #2a2a2a;
+      border-radius: 8px;
+    }
+
+    .test-button {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      margin: 5px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .test-button:hover {
+      background: #45a049;
+    }
+
+    .test-button.danger {
+      background: #f44336;
+    }
+
+    .test-button.danger:hover {
+      background: #da190b;
+    }
+
+    .code-block {
+      background: #333;
+      padding: 15px;
+      border-radius: 4px;
+      margin: 10px 0;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
+
+    .status {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 4px;
+      background: #4CAF50;
+    }
+
+    .status.error {
+      background: #f44336;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Web Update Model 功能测试</h1>
+
+    <div class="test-section">
+      <h2>测试说明</h2>
+      <p>这个页面用于测试 <code>webUpdateModel</code> 指令的功能。</p>
+      <p>数据格式：</p>
+      <div class="code-block">[
+        {
+        name: '设备名称',
+        visible: true,
+        code: '设备编号',
+        configs: [
+        {key: '属性名', value: '属性值'}
+        ]
+        }
+        ]</div>
+    </div>
+
+    <div class="test-section">
+      <h2>测试用例</h2>
+
+      <h3>1. 基础设备牌子</h3>
+      <button class="test-button" onclick="testBasicLabels()">创建基础设备牌子</button>
+      <p>创建简单的设备牌子，只显示设备名称</p>
+
+      <h3>2. 带配置信息的设备牌子</h3>
+      <button class="test-button" onclick="testConfigLabels()">创建带配置的设备牌子</button>
+      <p>创建包含配置信息的设备牌子</p>
+
+      <h3>3. 隐藏设备牌子</h3>
+      <button class="test-button" onclick="testHiddenLabels()">创建隐藏的设备牌子</button>
+      <p>创建但隐藏某些设备牌子</p>
+
+      <h3>4. 更新设备牌子</h3>
+      <button class="test-button" onclick="testUpdateLabels()">更新设备牌子</button>
+      <p>更新现有设备牌子的内容（会清除所有旧数据并重新生成）</p>
+
+      <h3>5. 测试完全替换</h3>
+      <button class="test-button" onclick="testCompleteReplace()">测试完全替换</button>
+      <p>推送完全不同的设备数组，验证清除和重新生成逻辑</p>
+
+      <h3>6. 清除设备牌子</h3>
+      <button class="test-button danger" onclick="testClearLabels()">清除所有设备牌子</button>
+      <p>清除所有设备牌子</p>
+
+      <h3>7. 测试实例存储</h3>
+      <button class="test-button" onclick="testInstanceStorage()">测试实例存储功能</button>
+      <p>测试数据保存和自动加载功能（刷新页面会清除）</p>
+
+      <h3>8. 清除实例数据</h3>
+      <button class="test-button danger" onclick="testClearInstance()">清除实例数据</button>
+      <p>清除实例中的设备标签数据</p>
+
+      <h3>9. 检查存储状态</h3>
+      <button class="test-button" onclick="checkStorageStatus()">检查存储状态</button>
+      <p>检查当前实例中的存储数据状态</p>
+
+      <h3>10. 清除指定设备</h3>
+      <button class="test-button danger" onclick="testClearSpecificDevice()">清除指定设备</button>
+      <p>清除指定设备编号的标签数据</p>
+    </div>
+
+    <div class="test-section">
+      <h2>测试状态</h2>
+      <div id="status"></div>
+    </div>
+  </div>
+
+  <script>
+    // 模拟 postMessage 发送
+    function sendMessage (cmd, param) {
+      const message = {
+        cmd: cmd,
+        param: param
+      };
+
+      // 发送到父窗口（如果存在）
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(message, '*');
+      }
+
+      // 也发送到当前窗口（用于测试）
+      window.postMessage(message, '*');
+
+      console.log('发送消息:', message);
+      updateStatus(`发送 ${cmd} 指令: ${JSON.stringify(param, null, 2)}`);
+    }
+
+    function updateStatus (message, isError = false) {
+      const statusDiv = document.getElementById('status');
+      const statusElement = document.createElement('div');
+      statusElement.className = `status ${isError ? 'error' : ''}`;
+      statusElement.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+      statusDiv.appendChild(statusElement);
+
+      // 保持最多10条状态信息
+      while (statusDiv.children.length > 10) {
+        statusDiv.removeChild(statusDiv.firstChild);
+      }
+    }
+
+    // 测试用例
+    function testBasicLabels () {
+      const data = [
+        {
+          name: '空调设备001',
+          visible: true,
+          code: '001',
+          configs: []
+        },
+        {
+          name: '配电设备002',
+          visible: true,
+          code: '002',
+          configs: []
+        }
+      ];
+      sendMessage('webUpdateModel', data);
+    }
+
+    function testConfigLabels () {
+      const data = [
+        {
+          name: '智能空调',
+          visible: true,
+          code: '001',
+          configs: [
+            { key: '温度', value: '25°C' },
+            { key: '湿度', value: '60%' },
+            { key: '状态', value: '运行中' }
+          ]
+        },
+        {
+          name: '配电箱',
+          visible: true,
+          code: '002',
+          configs: [
+            { key: '电压', value: '220V' },
+            { key: '电流', value: '10A' },
+            { key: '功率', value: '2.2kW' }
+          ]
+        }
+      ];
+      sendMessage('webUpdateModel', data);
+    }
+
+    function testHiddenLabels () {
+      const data = [
+        {
+          name: '可见设备',
+          visible: true,
+          code: '001',
+          configs: [
+            { key: '状态', value: '正常' }
+          ]
+        },
+        {
+          name: '隐藏设备',
+          visible: false,
+          code: '002',
+          configs: [
+            { key: '状态', value: '故障' }
+          ]
+        }
+      ];
+      sendMessage('webUpdateModel', data);
+    }
+
+    function testUpdateLabels () {
+      const data = [
+        {
+          name: '更新后的空调',
+          visible: true,
+          code: '001',
+          configs: [
+            { key: '温度', value: '28°C' },
+            { key: '湿度', value: '65%' },
+            { key: '状态', value: '待机' }
+          ]
+        }
+      ];
+      sendMessage('webUpdateModel', data);
+    }
+
+    function testCompleteReplace () {
+      // 先推送一组数据
+      const firstData = [
+        {
+          name: '第一组设备1',
+          visible: true,
+          code: '001',
+          configs: [
+            { key: '组别', value: '第一组' },
+            { key: '状态', value: '运行中' }
+          ]
+        },
+        {
+          name: '第一组设备2',
+          visible: true,
+          code: '002',
+          configs: [
+            { key: '组别', value: '第一组' },
+            { key: '状态', value: '待机' }
+          ]
+        }
+      ];
+
+      sendMessage('webUpdateModel', firstData);
+
+      // 延迟2秒后推送完全不同的数据
+      setTimeout(() => {
+        const secondData = [
+          {
+            name: '第二组设备A',
+            visible: true,
+            code: '003',
+            configs: [
+              { key: '组别', value: '第二组' },
+              { key: '状态', value: '正常' }
+            ]
+          },
+          {
+            name: '第二组设备B',
+            visible: true,
+            code: '004',
+            configs: [
+              { key: '组别', value: '第二组' },
+              { key: '状态', value: '维护中' }
+            ]
+          }
+        ];
+
+        sendMessage('webUpdateModel', secondData);
+        updateStatus('已推送完全不同的设备数组，验证清除和重新生成逻辑');
+      }, 2000);
+    }
+
+    function testClearLabels () {
+      sendMessage('webUpdateModel', []);
+    }
+
+    function testInstanceStorage () {
+      // 先保存一些测试数据
+      const testData = [
+        {
+          name: '实例存储测试设备1',
+          visible: true,
+          code: '001',
+          configs: [
+            { key: '存储状态', value: '已保存到实例' },
+            { key: '测试时间', value: new Date().toLocaleString() }
+          ]
+        },
+        {
+          name: '实例存储测试设备2',
+          visible: true,
+          code: '002',
+          configs: [
+            { key: '存储状态', value: '已保存到实例' },
+            { key: '测试时间', value: new Date().toLocaleString() }
+          ]
+        }
+      ];
+
+      sendMessage('webUpdateModel', testData);
+      updateStatus('已保存测试数据到实例，请切换楼层测试自动加载功能（刷新页面会清除数据）');
+    }
+
+    function testClearInstance () {
+      sendMessage('clearDeviceLabels', {});
+      updateStatus('已清除实例中的设备标签数据');
+    }
+
+    function checkStorageStatus () {
+      // 发送一个特殊的消息来检查存储状态
+      sendMessage('checkStorageStatus', {});
+      updateStatus('已发送检查存储状态请求，请查看控制台输出');
+    }
+
+    function testClearSpecificDevice () {
+      // 清除指定设备编号的数据
+      sendMessage('clearDeviceLabels', {
+        deviceCodes: ['001', '002']
+      });
+      updateStatus('已清除设备编号为 001 和 002 的标签数据');
+    }
+
+    // 监听消息响应
+    window.addEventListener('message', function (event) {
+      if (event.data && event.data.type === 'response') {
+        updateStatus(`收到响应: ${event.data.message}`);
+      }
+    });
+
+    // 页面加载完成后的提示
+    window.addEventListener('load', function () {
+      updateStatus('测试页面已加载，可以开始测试 webUpdateModel 功能');
+    });
+  </script>
+</body>
+
+</html>

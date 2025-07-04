@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>设备标签位置测试</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .test-section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+
+    .test-button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin: 5px;
+    }
+
+    .test-button:hover {
+      background: #0056b3;
+    }
+
+    .info-box {
+      background: #e7f3ff;
+      border: 1px solid #b3d9ff;
+      padding: 15px;
+      border-radius: 5px;
+      margin: 15px 0;
+    }
+
+    .code-block {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      padding: 10px;
+      border-radius: 5px;
+      font-family: monospace;
+      white-space: pre-wrap;
+      margin: 10px 0;
+    }
+
+    h2 {
+      color: #333;
+      border-bottom: 2px solid #007bff;
+      padding-bottom: 5px;
+    }
+
+    .highlight {
+      background: #fff3cd;
+      border: 1px solid #ffeaa7;
+      padding: 10px;
+      border-radius: 5px;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>设备标签位置测试</h1>
+    <p>测试设备标签在包围盒最高点中间位置的新逻辑</p>
+
+    <div class="info-box">
+      <h3>🎯 新位置逻辑</h3>
+      <p><strong>之前</strong>：标签显示在设备位置上方 2 个单位</p>
+      <p><strong>现在</strong>：标签显示在设备包围盒最高点的中间位置</p>
+    </div>
+
+    <div class="test-section">
+      <h2>1. 位置计算逻辑</h2>
+      <div class="code-block">
+        // 计算设备包围盒的最高点中间位置
+        const boundingBox = new THREE.Box3().setFromObject(deviceObject);
+        const devicePosition = new THREE.Vector3();
+
+        // 获取包围盒的中心点
+        boundingBox.getCenter(devicePosition);
+
+        // 将Y坐标设置为包围盒的最高点
+        devicePosition.y = boundingBox.max.y;
+
+        // 在最高点上方添加一点偏移，避免标签与设备重叠
+        devicePosition.y += 0.5;
+
+        css2dObject.position.copy(devicePosition);
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>2. 测试不同高度的设备</h2>
+      <p>测试不同高度的设备，标签应该都显示在各自的最高点</p>
+
+      <div class="highlight">
+        <h4>测试说明：</h4>
+        <ul>
+          <li>低矮设备：标签应该显示在设备顶部</li>
+          <li>高耸设备：标签应该显示在设备最高处</li>
+          <li>不规则设备：标签应该显示在包围盒的最高点</li>
+          <li>多个设备：每个设备的标签都应该在各自的最高点</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>3. 测试用例</h2>
+      <p>在3D场景中测试以下设备配置：</p>
+
+      <div class="code-block">
+        // 测试数据 - 不同高度的设备
+        const testDevices = [
+        {
+        name: '低矮设备',
+        visible: true,
+        code: '001',
+        configs: [{ key: '高度', value: '1.2m' }]
+        },
+        {
+        name: '中等设备',
+        visible: true,
+        code: '002',
+        configs: [{ key: '高度', value: '2.5m' }]
+        },
+        {
+        name: '高耸设备',
+        visible: true,
+        code: '003',
+        configs: [{ key: '高度', value: '4.8m' }]
+        }
+        ];
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>4. 验证要点</h2>
+      <div class="highlight">
+        <h4>✅ 验证清单：</h4>
+        <ol>
+          <li><strong>位置准确性</strong>：标签是否显示在设备包围盒的最高点中间</li>
+          <li><strong>偏移适当</strong>：标签是否与设备有适当的间距（0.5单位）</li>
+          <li><strong>水平居中</strong>：标签是否在设备的水平中心位置</li>
+          <li><strong>不同高度</strong>：不同高度的设备标签是否都在各自的最高点</li>
+          <li><strong>视觉清晰</strong>：标签是否清晰可见，不与设备重叠</li>
+          <li><strong>相机角度</strong>：从不同角度观察，标签位置是否合理</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>5. 使用方法</h2>
+      <p>在3D场景中测试新的标签位置：</p>
+
+      <div class="code-block">
+        // 1. 进入室内场景
+        // 2. 切换到包含设备的楼层
+        // 3. 发送测试数据
+        window.postMessage({
+        cmd: 'webUpdateModel',
+        param: [
+        {
+        name: '测试设备',
+        visible: true,
+        code: '001',
+        configs: [{ key: '状态', value: '正常' }]
+        }
+        ]
+        }, '*');
+
+        // 4. 观察标签位置是否在设备最高点
+        // 5. 从不同角度观察标签位置
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>6. 优势对比</h2>
+      <table style="width: 100%; border-collapse: collapse; margin: 15px 0;">
+        <thead>
+          <tr style="background: #f8f9fa;">
+            <th style="border: 1px solid #dee2e6; padding: 8px;">对比项</th>
+            <th style="border: 1px solid #dee2e6; padding: 8px;">之前（固定偏移）</th>
+            <th style="border: 1px solid #dee2e6; padding: 8px;">现在（包围盒最高点）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="border: 1px solid #dee2e6; padding: 8px;"><strong>位置精度</strong></td>
+            <td style="border: 1px solid #dee2e6; padding: 8px;">固定偏移，可能不准确</td>
+            <td style="border: 1px solid #dee2e6; padding: 8px;">基于实际几何体，精确</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #dee2e6; padding: 8px;"><strong>适应性</strong></td>
+            <td style="border: 1px solid #dee2e6; padding: 8px;">对所有设备使用相同偏移</td>
+            <td style="border: 1px solid #dee2e6; padding: 8px;">根据设备实际高度调整</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #dee2e6; padding: 8px;"><strong>视觉效果</strong></td>
+            <td style="border: 1px solid #dee2e6; padding: 8px;">可能被设备遮挡</td>
+            <td style="border: 1px solid #dee2e6; padding: 8px;">始终在设备顶部，清晰可见</td>
+          </tr>
+          <tr>
+            <td style="border: 1px solid #dee2e6; padding: 8px;"><strong>一致性</strong></td>
+            <td style="border: 1px solid #dee2e6; padding: 8px;">不同设备标签位置不一致</td>
+            <td style="border: 1px solid #dee2e6; padding: 8px;">所有设备标签都在最高点，一致</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="test-section">
+      <h2>7. 注意事项</h2>
+      <div class="highlight">
+        <h4>⚠️ 重要提醒：</h4>
+        <ul>
+          <li>确保设备对象有正确的几何体信息</li>
+          <li>包围盒计算依赖于设备的实际网格数据</li>
+          <li>如果设备是空的或没有几何体，包围盒可能不正确</li>
+          <li>建议在设备加载完成后再创建标签</li>
+          <li>可以通过调试信息查看包围盒的计算结果</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</body>
+
+</html>

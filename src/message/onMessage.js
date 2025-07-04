@@ -447,6 +447,44 @@ export const onMessage = async () => {
           });
           break;
         }
+        case "webUpdateModel": {
+          // 处理设备模型更新
+          if (core.indoorSubsystem) {
+            // 直接调用更新方法，该方法会清除旧数据并重新生成所有牌子
+            core.indoorSubsystem.updateDeviceLabels(event.data.param);
+          }
+          break;
+        }
+        case "clearDeviceLabels": {
+          // 清除设备标签和实例数据
+          if (core.indoorSubsystem) {
+            const deviceCodes =
+              event.data.param && event.data.param.deviceCodes;
+            core.indoorSubsystem.clearDeviceLabelsAndInstance(deviceCodes);
+          }
+          break;
+        }
+        case "checkStorageStatus": {
+          // 检查存储状态
+          if (core.indoorSubsystem) {
+            console.log("=== 存储状态检查 ===");
+            console.log(
+              "当前楼层:",
+              core.indoorSubsystem.currentFloor
+                ? core.indoorSubsystem.currentFloor.name
+                : "null"
+            );
+            console.log("存储的数据:", core.indoorSubsystem.deviceLabelsData);
+            console.log(
+              "设备标签数量:",
+              core.indoorSubsystem.deviceLabels
+                ? core.indoorSubsystem.deviceLabels.length
+                : 0
+            );
+            console.log("==================");
+          }
+          break;
+        }
       }
     }
   });

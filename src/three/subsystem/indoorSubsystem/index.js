@@ -5,11 +5,13 @@ import { CustomSystem } from "../customSystem";
 import { loadGLTF } from "@/three/loader";
 import { getBoxCenter } from "../../../lib/box3Fun";
 import { lightIndexUpdate, lightIndexReset } from "../../../shader/funs";
+import { createCSS2DObject } from "../../../lib/CSSObject";
 
 import { changeIndoor } from "../../../message/postMessage";
 import EquipmentPlate from "../../components/business/equipMentPlate";
 import { SunnyTexture } from "../../components/weather";
 import { SpecialGround } from "../../../lib/blMeshes";
+import BoxModel from "../../../lib/boxModel";
 import { dynamicFade, fadeByTime } from "../../../shader";
 import { SceneHint } from "../../components/SceneHint";
 
@@ -49,6 +51,9 @@ export class IndoorSubsystem extends CustomSystem {
     // 保存用于射线检测的楼层引用，定位
     this.floors = [];
 
+    // 设备标签数据存储（按楼层存储）
+    this.deviceLabelsData = {};
+
     // 初始化场景提示
     this.sceneHint = new SceneHint();
     console.log("this.sceneHint", this);
@@ -84,11 +89,20 @@ export class IndoorSubsystem extends CustomSystem {
   }
 
   createGround(center, min) {
-    const ground = new SpecialGround(center, min);
+    // 获取建筑的包围盒
+    let boundingBox = null;
+    if (this.building) {
+      boundingBox = new THREE.Box3().setFromObject(this.building);
+    }
+
+    const ground = new SpecialGround(center, min, boundingBox);
 
     // 设置地面接收阴影
     ground.receiveShadow = true;
     ground.castShadow = false; // 地面通常不投射阴影
+
+    // 保存地面引用以便在渲染循环中更新
+    this.ground = ground;
 
     // 设置地面材质的环境贴图
     if (this.scene.environment && ground.material) {
@@ -96,6 +110,49 @@ export class IndoorSubsystem extends CustomSystem {
     }
 
     this.scene.add(ground);
+  }
+
+  /**
+   * 创建BoxModel地面
+   */
+  createBoxModelGround(center, radius) {
+    // 移除现有的BoxModel地面
+    if (this.boxModelGround) {
+      this.boxModelGround.dispose();
+      this.boxModelGround = null;
+    }
+
+    // 创建新的BoxModel地面
+    this.boxModelGround = new BoxModel(this.core);
+    this.boxModelGround.initModel(center, radius);
+  }
+
+  /**
+   * 重新创建地面 - 根据当前模型重新计算地面范围
+   */
+  recreateGround() {
+    // 移除现有地面
+    if (this.ground) {
+      this.scene.remove(this.ground);
+      if (this.ground.geometry) {
+        this.ground.geometry.dispose();
+      }
+      if (this.ground.material) {
+        this.ground.material.dispose();
+      }
+      this.ground = null;
+    }
+
+    // 重新计算模型参数
+    const param = getBoxCenter(this.building);
+
+    // 创建新的地面 - 使用BoxModel
+    this.createBoxModelGround(param.center, param.radius);
+
+    console.log(
+      "BoxModel地面已重新创建，新尺寸基于当前模型:",
+      this.building.name
+    );
   }
 
   resetControls() {
@@ -168,13 +225,18 @@ export class IndoorSubsystem extends CustomSystem {
   }
 
   onLoaded() {
-    const param = getBoxCenter(this.building);
-    this.createGround(param.center, param.min);
+    // 重新计算地面范围
+    this.recreateGround();
 
     this.createAndSetupLights(this.building);
 
     if (this.scene.environment) {
       this.processIndoorEnvMapMaterials();
+    }
+
+    // 设置渲染队列，确保地面着色器能够更新
+    if (this.core && this.core.onRenderQueue) {
+      this.core.onRenderQueue.set("indoorSubsystem", this.update.bind(this));
     }
 
     this.cameraMove(this.building);
@@ -188,7 +250,7 @@ export class IndoorSubsystem extends CustomSystem {
       target = center;
       position = new THREE.Vector3();
       const _distance = this.camera.position.distanceTo(center);
-      const alpha = (_distance - Math.sqrt(radius) * 12) / _distance;
+      const alpha = (_distance - Math.sqrt(radius) * 8) / _distance;
       position.lerpVectors(this.camera.position, center, alpha);
 
       this.tweenControl.changeTo({
@@ -263,6 +325,11 @@ export class IndoorSubsystem extends CustomSystem {
       this.sceneHint.hide();
     }
 
+    // 清理渲染队列
+    if (this.core && this.core.onRenderQueue) {
+      this.core.onRenderQueue.delete("indoorSubsystem");
+    }
+
     this.clearIndoorHDR();
     this.removeIndoorLights();
 
@@ -302,6 +369,9 @@ export class IndoorSubsystem extends CustomSystem {
 
     if (!this.endChangeFloor) return false;
     this.resetData();
+
+    // 清理当前楼层的设备标签
+    this.clearDeviceLabels();
     if (!this.currentFloor) {
       this.endChangeFloor = false;
       this.removeEventListener();
@@ -323,63 +393,26 @@ export class IndoorSubsystem extends CustomSystem {
         this.endChangeFloor = true;
         this.gatherOrSilentShader();
 
+        // 在楼层切换动画完成后加载设备标签数据
+        this.loadAndRenderDeviceLabels();
+
         // if (this.sceneHint) {
         //   this.sceneHint.updateMessage("右键双击显示楼栋");
         // }
       });
       this.buildingAnimate(floor);
     }
-    if (this.currentFloor && this.currentFloor.name === floor) return;
+    if (
+      this.currentFloor &&
+      this.currentFloor.name === floor &&
+      this.endChangeFloor
+    )
+      return;
 
-    this.floorSwitchInner(floor);
+    // this.floorSwitchInner(floor);
 
-    // ----------------- 新增：楼层children射线检测与outline -----------------
-    if (this._indoorRaycastClearFns) {
-      this._indoorRaycastClearFns.forEach((fn) => fn());
-    }
-    const children = this.buildingObject[floor].group.children;
-    this._indoorRaycastClearFns = [];
-    // 鼠标移动高亮
-    const moveEvt = this.core.raycast("mousemove", children, (intersects) => {
-      if (intersects.length) {
-        this.core.postprocessing.clearOutlineAll(1);
-        this.core.postprocessing.addOutline(intersects[0].object, 1);
-      } else {
-        this.core.postprocessing.clearOutlineAll(1);
-      }
-    });
-    this._indoorRaycastClearFns.push(moveEvt.clear);
-
-    // 点击切换视角和蓝色轮廓
-    const clickEvt = this.core.raycast("click", children, (intersects) => {
-      if (intersects.length) {
-        const targetObj = intersects[0].object;
-        this.cameraMove(targetObj).then(() => {
-          children.forEach((obj) => {
-            if (obj === targetObj) {
-              this.core.postprocessing.addOutline(obj, 1); // 高亮
-            } else {
-              this.core.postprocessing.addOutline(obj, 2); // 蓝色轮廓
-            }
-          });
-        });
-      }
-    });
-    this._indoorRaycastClearFns.push(clickEvt.clear);
-
-    // 右键双击恢复
-    const rightEvt = this.rightDblClickListener(() => {
-      this._indoorRaycastClearFns.forEach((fn) => fn());
-      this._indoorRaycastClearFns = [];
-      this.core.postprocessing.clearOutlineAll(1);
-      this.core.postprocessing.clearOutlineAll(2);
-      // 恢复全部显示
-      children.forEach((obj) => (obj.visible = true));
-      // 视角复位
-      this.cameraMove(this.buildingObject[floor].group);
-    });
-    this._indoorRaycastClearFns.push(rightEvt);
-    // ----------------------------------------------------------
+    // 拆分后的事件注册
+    this.setupFloorRaycastEvents(floor);
   }
   gatherOrSilentShader() {
     this.disPoseGatherShader();
@@ -556,6 +589,9 @@ export class IndoorSubsystem extends CustomSystem {
       super.updateOrientation();
       this.core.crossSearch.changeSceneSearch();
       this.endChangeFloor = true;
+
+      // 在楼层内部切换完成后加载设备标签数据
+      this.loadAndRenderDeviceLabels();
     });
   }
   resetEffect() {
@@ -601,10 +637,7 @@ export class IndoorSubsystem extends CustomSystem {
   }
 
   removeEventListener() {
-    if (this._indoorRaycastClearFns) {
-      this._indoorRaycastClearFns.forEach((fn) => fn());
-      this._indoorRaycastClearFns = [];
-    }
+    this.clearFloorRaycastEvents();
     this.eventClear.forEach((clear) => clear());
     this.eventClear = [];
     this.resetEffect();
@@ -616,6 +649,15 @@ export class IndoorSubsystem extends CustomSystem {
     this.resetData();
     this.scene.dispose();
     lightIndexUpdate();
+
+    // 清理设备牌子
+    this.clearDeviceLabelsAndInstance();
+
+    // 清理BoxModel地面
+    if (this.boxModelGround) {
+      this.boxModelGround.dispose();
+      this.boxModelGround = null;
+    }
 
     if (this.sceneHint) {
       this.sceneHint.destroy();
@@ -829,6 +871,21 @@ export class IndoorSubsystem extends CustomSystem {
   }
 
   /**
+   * 子系统执行在动画帧中函数
+   */
+  update() {
+    // 更新地面着色器时间
+    if (this.ground && this.ground.update) {
+      this.ground.update(this.core);
+    }
+
+    // 更新BoxModel地面
+    if (this.boxModelGround) {
+      this.boxModelGround.update(this.core.elapsedTime);
+    }
+  }
+
+  /**
    * 清理室内系统数据（用于室内切换时的清理）
    */
   clearIndoorData() {
@@ -836,8 +893,29 @@ export class IndoorSubsystem extends CustomSystem {
     this.resetData();
     this.disposeGatherOrSilent();
 
+    // 清理设备牌子
+    this.clearDeviceLabelsAndInstance();
+
     if (this.sceneHint) {
       this.sceneHint.hide();
+    }
+
+    // 清理地面
+    if (this.ground) {
+      this.scene.remove(this.ground);
+      if (this.ground.geometry) {
+        this.ground.geometry.dispose();
+      }
+      if (this.ground.material) {
+        this.ground.material.dispose();
+      }
+      this.ground = null;
+    }
+
+    // 清理BoxModel地面
+    if (this.boxModelGround) {
+      this.boxModelGround.dispose();
+      this.boxModelGround = null;
     }
 
     if (this.building && this.building.parent) {
@@ -877,7 +955,7 @@ export class IndoorSubsystem extends CustomSystem {
     const maxDimension = Math.max(buildingWidth, buildingHeight, buildingDepth);
 
     // 创建环境光
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     this.ambientLight = ambientLight;
     this._add(this.ambientLight);
 
@@ -892,7 +970,7 @@ export class IndoorSubsystem extends CustomSystem {
     const targetPosition = center.clone();
     targetPosition.y = min.y - 50; // 目标点稍微低于地面，确保覆盖地面
     directionalLight.target.position.copy(targetPosition);
-    this._add(directionalLight.target);
+    // this._add(directionalLight.target);
 
     // 配置方向光的阴影
     directionalLight.castShadow = true;
@@ -950,5 +1028,489 @@ export class IndoorSubsystem extends CustomSystem {
     this.ambientLight = null;
     this.directionLight = null;
     this.auxiliaryLight = null;
+  }
+
+  // 新增：清理楼层射线检测事件
+  clearFloorRaycastEvents() {
+    if (this._indoorRaycastClearFns) {
+      this._indoorRaycastClearFns.forEach((fn) => fn());
+      this._indoorRaycastClearFns = [];
+    }
+  }
+
+  // 新增：注册楼层children射线检测与outline事件
+  setupFloorRaycastEvents(floor) {
+    this.clearFloorRaycastEvents();
+    const children = this.buildingObject[floor].group.children;
+    this._indoorRaycastClearFns = [];
+    // 初始化时保存原始材质
+    children.forEach((obj) => {
+      obj.typeName = "device";
+      obj.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material) {
+          // 保存原始材质到对象本身
+          if (!child._originalMaterial) {
+            child._originalMaterial = child.material.clone();
+          }
+        }
+      });
+    });
+    // 鼠标移动高亮
+    const moveEvt = this.core.raycast("mousemove", children, (intersects) => {
+      if (intersects.length) {
+        this.core.postprocessing.clearOutlineAll(1);
+        this.core.postprocessing.addOutline(intersects[0].object, 1);
+      } else {
+        this.core.postprocessing.clearOutlineAll(1);
+      }
+    });
+    this._indoorRaycastClearFns.push(moveEvt.clear);
+
+    // 点击切换视角和蓝色轮廓
+    const clickEvt = this.core.raycast("click", children, (intersects) => {
+      if (intersects.length) {
+        let targetObj = intersects[0].object;
+        targetObj = this.getDeviceObject(targetObj);
+        if (!targetObj) return;
+        // 拉近视角到当前点击设备
+        this.cameraMove(targetObj).then(() => {
+          children.forEach((obj) => {
+            if (obj === targetObj) {
+              obj.traverse((child) => {
+                if (child instanceof THREE.Mesh && child.material) {
+                  // 选中对象恢复原始材质
+                  if (child._originalMaterial) {
+                    child.material = child._originalMaterial;
+                  }
+                  child.material.wireframe = false;
+                  child.material.transparent = false;
+                }
+              });
+            } else {
+              // 其他设备变成蓝色材质
+              obj.traverse((child) => {
+                if (child instanceof THREE.Mesh && child.material) {
+                  // 创建蓝色材质
+                  const blueMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x0066ff,
+                    transparent: true,
+                    opacity: 0.8,
+                    wireframe: true,
+                  });
+                  child.material = blueMaterial;
+                }
+              });
+            }
+          });
+        });
+      }
+    });
+    this._indoorRaycastClearFns.push(clickEvt.clear);
+
+    // 右键双击恢复
+    const rightEvt = this.rightDblClickListener(() => {
+      // 只清除轮廓，不清除事件监听器
+      this.core.postprocessing.clearOutlineAll(1);
+      this.core.postprocessing.clearOutlineAll(2);
+      // 恢复全部显示和原始材质
+      children.forEach((obj) => {
+        obj.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            // 恢复原始材质
+            if (child._originalMaterial) {
+              child.material = child._originalMaterial;
+            } else {
+              // 如果没有保存原始材质，则重置为默认状态
+              child.material.wireframe = false;
+              child.material.transparent = false;
+            }
+            child.visible = true;
+          }
+        });
+      });
+      // 视角复位到切换楼层时的位置
+      this.cameraMoveToFloor(this.buildingObject[floor].group).then(() => {
+        // 设备恢复后，重新注册退出事件
+        if (!this.core.isFollowing()) {
+          this.addRightDbClickQuit();
+        }
+      });
+    });
+    this._indoorRaycastClearFns.push(rightEvt);
+  }
+
+  // 递归查找typeName为'device'的对象
+  getDeviceObject(obj) {
+    if (!obj) return null;
+    if (obj.typeName === "device") return obj;
+    return this.getDeviceObject(obj.parent);
+  }
+
+  /**
+   * 保存设备标签数据到实例变量
+   * @param {Array} deviceData - 设备数据数组
+   */
+  saveDeviceLabelsToInstance(deviceData) {
+    if (!Array.isArray(deviceData)) {
+      console.warn("设备数据格式错误，应为数组");
+      return;
+    }
+
+    console.log("保存设备标签数据...");
+    console.log("要保存的数据:", deviceData);
+
+    // 按设备编号存储数据
+    deviceData.forEach((device) => {
+      const { code } = device;
+      if (code) {
+        this.deviceLabelsData[code] = device;
+        console.log(`设备标签数据已保存到实例: ${code}`, device);
+      } else {
+        console.warn("设备数据缺少code字段:", device);
+      }
+    });
+
+    console.log("当前所有存储的数据:", this.deviceLabelsData);
+  }
+
+  /**
+   * 从实例变量读取设备标签数据
+   * @returns {Array|null} 设备数据数组或null
+   */
+  loadDeviceLabelsFromInstance() {
+    if (!this.currentFloor || !this.buildingObject[this.currentFloor.name]) {
+      console.log("当前楼层或建筑数据不存在");
+      return null;
+    }
+
+    const children = this.buildingObject[this.currentFloor.name].group.children;
+    const availableDevices = [];
+    const deviceData = [];
+
+    // 遍历当前楼层的所有设备
+    children.forEach((child) => {
+      const deviceCode = child.name.split("_")[0];
+      if (deviceCode && this.deviceLabelsData[deviceCode]) {
+        availableDevices.push(deviceCode);
+        deviceData.push(this.deviceLabelsData[deviceCode]);
+      }
+    });
+
+    if (deviceData.length > 0) {
+      console.log(
+        `从实例读取设备标签数据，找到 ${deviceData.length} 个设备:`,
+        availableDevices
+      );
+      console.log("设备数据:", deviceData);
+      return deviceData;
+    }
+
+    console.log("当前楼层没有找到对应的设备标签数据");
+    return null;
+  }
+
+  /**
+   * 清除实例中的设备标签数据
+   * @param {Array} deviceCodes - 要清除的设备编号数组，如果不传则清除所有数据
+   */
+  clearDeviceLabelsFromInstance(deviceCodes = null) {
+    if (deviceCodes && Array.isArray(deviceCodes)) {
+      // 清除指定的设备数据
+      deviceCodes.forEach((code) => {
+        if (this.deviceLabelsData[code]) {
+          delete this.deviceLabelsData[code];
+          console.log(`已清除设备标签数据: ${code}`);
+        }
+      });
+    } else {
+      // 清除所有数据
+      this.deviceLabelsData = {};
+      console.log("已清除所有设备标签数据");
+    }
+  }
+
+  /**
+   * 清除所有楼层的设备标签数据
+   */
+  clearAllDeviceLabelsData() {
+    this.deviceLabelsData = {};
+    console.log("已清除所有楼层的设备标签数据");
+  }
+
+  /**
+   * 加载并渲染实例中的设备标签
+   */
+  loadAndRenderDeviceLabels() {
+    // 等待一帧确保设备对象已加载完成
+    requestAnimationFrame(() => {
+      console.log("开始加载设备标签数据...");
+      console.log(
+        "当前楼层:",
+        this.currentFloor ? this.currentFloor.name : "null"
+      );
+      console.log("存储的数据:", this.deviceLabelsData);
+
+      const deviceData = this.loadDeviceLabelsFromInstance();
+      if (deviceData && deviceData.length > 0) {
+        console.log("自动加载实例中的设备标签数据");
+        this.updateDeviceLabels(deviceData);
+      } else {
+        console.log("没有找到当前楼层的设备标签数据");
+      }
+    });
+  }
+
+  /**
+   * 更新设备标签
+   * @param {Array} deviceData - 设备数据数组
+   */
+  updateDeviceLabels(deviceData) {
+    if (!Array.isArray(deviceData)) {
+      console.warn("设备数据格式错误，应为数组");
+      return;
+    }
+
+    console.log("开始更新设备标签...");
+    console.log("新数据:", deviceData);
+
+    // 清除现有的设备牌子
+    this.clearDeviceLabels();
+
+    // 清除实例中的所有设备标签数据
+    this.clearDeviceLabelsFromInstance();
+
+    // 保存新的数据到实例
+    this.saveDeviceLabelsToInstance(deviceData);
+
+    // 为每个设备创建新的牌子
+    deviceData.forEach((device) => {
+      this.createDeviceLabel(device);
+    });
+
+    console.log("设备标签更新完成");
+  }
+
+  /**
+   * 清除所有设备牌子
+   */
+  clearDeviceLabels() {
+    console.log("开始清除设备牌子...");
+    console.log(
+      "当前设备牌子数量:",
+      this.deviceLabels ? this.deviceLabels.length : 0
+    );
+
+    if (this.deviceLabels && this.deviceLabels.length > 0) {
+      this.deviceLabels.forEach((label, index) => {
+        console.log(`清除第 ${index + 1} 个设备牌子:`, label.code);
+
+        // 清除DOM元素
+        if (label.element) {
+          console.log(`移除DOM元素: ${label.code}`);
+          label.element.remove();
+          label.element = null;
+        }
+
+        // 清除CSS2D对象
+        if (label.css2dObject) {
+          console.log(`从场景移除CSS2D对象: ${label.code}`);
+
+          // 确保从父对象中移除
+          if (label.css2dObject.parent) {
+            label.css2dObject.parent.remove(label.css2dObject);
+          }
+
+          // 从场景中移除
+          this.scene.remove(label.css2dObject);
+
+          // 清理CSS2D对象的引用
+          label.css2dObject = null;
+        }
+
+        // 清理设备对象引用
+        if (label.deviceObject) {
+          label.deviceObject = null;
+        }
+      });
+
+      // 清空数组
+      this.deviceLabels = [];
+      console.log("设备牌子数组已清空");
+    } else {
+      console.log("没有设备牌子需要清除");
+    }
+
+    // 强制清理场景中可能残留的CSS2D对象
+    this.scene.traverse((object) => {
+      if (object.name && object.name.startsWith("device-label-")) {
+        console.log(`发现残留的CSS2D对象: ${object.name}，正在移除...`);
+        this.scene.remove(object);
+      }
+    });
+
+    // 清理CSS2D渲染器DOM元素中可能残留的设备标签
+    const css2dRenderer = document.getElementById("css2dRenderer");
+    if (css2dRenderer) {
+      const deviceLabels = css2dRenderer.querySelectorAll(
+        ".device-label-container"
+      );
+      console.log(
+        `在CSS2D渲染器中发现 ${deviceLabels.length} 个残留的设备标签DOM元素`
+      );
+      deviceLabels.forEach((label, index) => {
+        console.log(`移除残留的DOM元素 ${index + 1}:`, label);
+        label.remove();
+      });
+    }
+
+    console.log("设备牌子清除完成");
+  }
+
+  /**
+   * 清除所有设备牌子并清除实例数据
+   * @param {Array} deviceCodes - 要清除的设备编号数组，如果不传则清除所有数据
+   */
+  clearDeviceLabelsAndInstance(deviceCodes = null) {
+    this.clearDeviceLabels();
+    this.clearDeviceLabelsFromInstance(deviceCodes);
+  }
+
+  /**
+   * 创建单个设备牌子
+   * @param {Object} device - 设备数据
+   */
+  createDeviceLabel(device) {
+    const { name, visible = true, code, configs = [] } = device;
+
+    // 根据code查找对应的设备对象
+    const deviceObject = this.findDeviceByCode(code);
+    if (!deviceObject) {
+      console.warn(`未找到设备编号为 ${code} 的设备`);
+      return;
+    }
+
+    // 创建牌子容器
+    const labelContainer = document.createElement("div");
+    labelContainer.className = "device-label-container";
+
+    // 创建牌子主体
+    const labelMain = document.createElement("div");
+    labelMain.className = "device-label-main";
+
+    // 创建设备名称
+    const nameElement = document.createElement("div");
+    nameElement.className = "device-label-name";
+    nameElement.textContent = name;
+    labelMain.appendChild(nameElement);
+
+    // 创建配置信息
+    if (configs && configs.length > 0) {
+      const configContainer = document.createElement("div");
+      configContainer.className = "device-label-configs";
+
+      configs.forEach((config) => {
+        const configItem = document.createElement("div");
+        configItem.className = "device-label-config-item";
+
+        const keyElement = document.createElement("span");
+        keyElement.className = "device-label-config-key";
+        keyElement.textContent = config.key + ": ";
+
+        const valueElement = document.createElement("span");
+        valueElement.className = "device-label-config-value";
+        valueElement.textContent = config.value;
+
+        configItem.appendChild(keyElement);
+        configItem.appendChild(valueElement);
+        configContainer.appendChild(configItem);
+      });
+
+      labelMain.appendChild(configContainer);
+    }
+
+    // 创建装饰元素
+    const labelTop = document.createElement("div");
+    labelTop.className = "device-label-top";
+
+    const labelBottom = document.createElement("div");
+    labelBottom.className = "device-label-bottom";
+
+    const labelBottomDown = document.createElement("div");
+    labelBottomDown.className = "device-label-bottom-down";
+
+    // 组装牌子
+    labelContainer.appendChild(labelMain);
+    labelContainer.appendChild(labelTop);
+    labelContainer.appendChild(labelBottom);
+    labelContainer.appendChild(labelBottomDown);
+
+    // 创建CSS2D对象
+    const css2dObject = createCSS2DObject(
+      labelContainer,
+      `device-label-${code}`
+    );
+
+    // 计算设备包围盒的最高点中间位置
+    const boundingBox = new THREE.Box3().setFromObject(deviceObject);
+    const devicePosition = new THREE.Vector3();
+
+    // 获取包围盒的中心点
+    boundingBox.getCenter(devicePosition);
+
+    // 将Y坐标设置为包围盒的最高点
+    devicePosition.y = boundingBox.max.y;
+
+    // 在最高点上方添加一点偏移，避免标签与设备重叠
+    // devicePosition.y += 0.5;
+
+    // 调试信息：输出包围盒信息
+    console.log(`设备 ${code} 包围盒信息:`, {
+      min: boundingBox.min.toArray(),
+      max: boundingBox.max.toArray(),
+      center: devicePosition.toArray(),
+      deviceName: deviceObject.name,
+    });
+
+    css2dObject.position.copy(devicePosition);
+
+    // 设置可见性
+    css2dObject.visible = visible;
+
+    // 添加到场景
+    this.scene.add(css2dObject);
+
+    // 保存引用
+    if (!this.deviceLabels) {
+      this.deviceLabels = [];
+    }
+    this.deviceLabels.push({
+      code,
+      element: labelContainer,
+      css2dObject,
+      deviceObject,
+    });
+  }
+
+  /**
+   * 根据设备编号查找设备对象
+   * @param {string} code - 设备编号
+   * @returns {THREE.Object3D|null} 设备对象
+   */
+  findDeviceByCode(code) {
+    if (!this.currentFloor || !this.buildingObject[this.currentFloor.name]) {
+      return null;
+    }
+
+    const children = this.buildingObject[this.currentFloor.name].group.children;
+
+    for (const child of children) {
+      // 检查设备名称是否包含设备编号
+      const deviceCode = child.name.split("_")[0];
+      if (deviceCode === code) {
+        return child;
+      }
+    }
+
+    return null;
   }
 }

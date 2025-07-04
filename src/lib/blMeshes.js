@@ -826,28 +826,191 @@ class StarLink extends THREE.Points {
 }
 
 class SpecialGround extends THREE.Mesh {
-  /**@param {THREE.Box3} aabb BoundingBox */
-  constructor(center, min) {
+  /**@param {THREE.Vector3} center 模型中心点
+   * @param {THREE.Vector3} min 模型最小点
+   * @param {THREE.Box3} boundingBox 模型包围盒（可选）
+   */
+  constructor(center, min, boundingBox = null) {
     super();
-    const textureLoader = new THREE.TextureLoader();
-    const uBg = textureLoader.load("/textures/bg.png");
-    this.position.set(center.x, min.y - 20, center.z);
-    this.geometry = new THREE.PlaneGeometry(2000, 2000);
+
+    // 计算地面尺寸
+    let groundWidth, groundHeight;
+
+    if (boundingBox) {
+      // 如果有包围盒，使用包围盒尺寸并增加一些边距
+      const boxSize = new THREE.Vector3();
+      boundingBox.getSize(boxSize);
+      const padding = Math.max(boxSize.x, boxSize.z) * 0.2; // 20% 的边距
+      groundWidth = boxSize.x + padding;
+      groundHeight = boxSize.z + padding;
+    } else {
+      // 如果没有包围盒，使用默认尺寸（比原来小很多）
+      groundWidth = 100;
+      groundHeight = 100;
+    }
+
+    // 设置地面位置在包围盒的 min 位置
+    this.position.set(center.x, min.y - 0.2, center.z);
+    this.geometry = new THREE.PlaneGeometry(groundWidth, groundHeight);
     this.geometry.rotateX(-Math.PI / 2);
-    // 使用 MeshStandardMaterial 以支持阴影
-    this.material = new THREE.MeshStandardMaterial({
+
+    // 使用自定义着色器材质 - 基于扩大.glsl
+    this.material = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.6,
-      color: new THREE.Color("#7b8593"),
-      map: uBg,
-      metalness: 0.1,
-      roughness: 0.8,
+      uniforms: {
+        uTime: { value: 0.0 },
+        uResolution: { value: new THREE.Vector2(groundWidth, groundHeight) },
+        uFrame: { value: 0 },
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        #define tau 6.28
+        
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform int uFrame;
+        
+        varying vec2 vUv;
+        
+        float scl = 8.0; // 减小网格密度，让效果更分散
+        
+        mat2 rotate(float rad) {
+          float c = cos(rad);
+          float s = sin(rad);
+          return mat2(c, -s, s, c);
+        }
+        
+        // cubic pulse by iq
+        float cubicPulse(float c, float w, float x) {
+          x = abs(x - c);
+          if(x > w) return 0.0;
+          x /= w;
+          return 1.0 - x * x * (3.0 - 2.0 * x);
+        }
+        
+        // 2D sdf by iq
+        float sdOrientedBox(in vec2 p, in vec2 a, in vec2 b, float th) {
+          float l = length(b - a);
+          vec2 d = (b - a) / l;
+          vec2 q = (p - (a + b) * 0.5);
+          q = mat2(d.x, -d.y, d.y, d.x) * q;
+          q = abs(q) - vec2(l, th) * 0.5;
+          return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+        }
+        
+        float sdRoundedLine(in vec2 p, in vec2 a, in vec2 b, float weight, float roundedness) {
+          return sdOrientedBox(p, a, b, weight) - roundedness;
+        }
+        
+        float sdGridLine(vec2 cellPos, vec2 a, vec2 b) {
+          float lineLength = distance(a, b);
+          float line = sdOrientedBox(cellPos, a, b, 0.0);
+          float smallLength = 0.0;
+          float bigLength = 2.0; // 增大线条影响范围
+          float closeness = smoothstep(bigLength, smallLength, lineLength);
+          float thickness = 0.03; // 减小线条厚度，让效果更细腻
+          return closeness * smoothstep(thickness, 0.0, line);
+        }
+        
+        // Hash without Sine - David Hoskins
+        float hash12(vec2 p) {
+          vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+          p3 += dot(p3, p3.yzx + 33.33);
+          return fract((p3.x + p3.y) * p3.z);
+        }
+        
+        vec2 getGridPoint(vec2 id) {
+          float t = float(uFrame) * 0.001;
+          float d = smoothstep(scl * 0.5, 0.0, length(id)); // 扩大影响范围
+          float theta = tau * (t + 731.154 * hash12(id));
+          float x = d * 0.3 * cos(theta); // 减小振幅
+          float y = d * 0.3 * sin(theta);
+          vec2 wave = (1.0 - d) * 0.02 * id * sin(length(id) - t * scl * 0.5); // 减小波浪强度
+          return vec2(x, y) + wave;
+        }
+        
+        float allLinesOnThisCell(vec2 cellPos, vec2[9] points) {
+          float sum = 0.0;
+          sum += sdGridLine(cellPos, points[4], points[0]);
+          sum += sdGridLine(cellPos, points[4], points[1]);
+          sum += sdGridLine(cellPos, points[4], points[2]);
+          sum += sdGridLine(cellPos, points[4], points[3]);
+          sum += sdGridLine(cellPos, points[4], points[5]);
+          sum += sdGridLine(cellPos, points[4], points[6]);
+          sum += sdGridLine(cellPos, points[4], points[7]);
+          sum += sdGridLine(cellPos, points[4], points[8]);
+          sum += sdGridLine(cellPos, points[1], points[3]);
+          sum += sdGridLine(cellPos, points[1], points[5]);
+          sum += sdGridLine(cellPos, points[3], points[7]);
+          sum += sdGridLine(cellPos, points[5], points[7]);
+          return sum;
+        }
+        
+        vec2[9] createPointMatrix(vec2 cellId) {
+          vec2[9] pointMatrix;
+          float range = 1.0;
+          int i = 0;
+          for(float x = -range; x <= range; x++) {
+            for(float y = -range; y <= range; y++) {
+              vec2 offset = vec2(x, y);
+              pointMatrix[i] = getGridPoint(cellId + offset) + offset;
+              i++;
+            }
+          }
+          return pointMatrix;
+        }
+        
+        float render(vec2 uv) {
+          float pct = 0.12;
+          vec2 cellPos = fract(uv * scl) - 0.5;
+          vec2 cellId = floor(uv * scl) + 0.5;
+          vec2[9] pointMatrix = createPointMatrix(cellId);
+          return allLinesOnThisCell(cellPos, pointMatrix);
+        }
+        
+        vec3 gammaCorrection(vec3 rgb) {
+          float gamma = 2.2;
+          return pow(max(rgb, 0.0), vec3(1.0 / gamma));
+        }
+        
+        void main() {
+          vec2 uv = (vUv - 0.5) * 2.0;
+          uv.x *= uResolution.x / uResolution.y;
+          
+          vec2 colorOffset = normalize(uv) * 0.003 * smoothstep(0.2, 0.5, length(uv));
+          vec3 col = vec3(
+            render(uv - colorOffset),
+            render(uv),
+            render(uv + colorOffset)
+          );
+          
+          // 更柔和的边缘处理，扩大范围
+          float edge = smoothstep(0.0, 0.05, 1.0 - length(vUv - 0.5) * 1.5);
+          col *= edge;
+          
+          // 添加全局渐变，让效果更自然
+          float globalFade = smoothstep(0.0, 0.3, 1.0 - length(vUv - 0.5) * 1.2);
+          col *= globalFade;
+          
+          gl_FragColor = vec4(gammaCorrection(col), 0.4);
+        }
+      `,
     });
   }
 
   update(core) {
-    // 标准材质不需要更新时间
+    // 更新时间uniform
+    if (this.material && this.material.uniforms) {
+      this.material.uniforms.uTime.value = core.elapsedTime;
+      this.material.uniforms.uFrame.value = Math.floor(core.elapsedTime * 60); // 假设60fps
+    }
   }
 }
 

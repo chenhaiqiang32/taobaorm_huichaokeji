@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>webUpdateModel 更新逻辑测试</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .test-section {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+
+    .test-button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 5px;
+      cursor: pointer;
+      margin: 5px;
+    }
+
+    .test-button:hover {
+      background: #0056b3;
+    }
+
+    .test-button.danger {
+      background: #dc3545;
+    }
+
+    .test-button.danger:hover {
+      background: #c82333;
+    }
+
+    .info-box {
+      background: #e7f3ff;
+      border: 1px solid #b3d9ff;
+      padding: 15px;
+      border-radius: 5px;
+      margin: 15px 0;
+    }
+
+    .warning-box {
+      background: #fff3cd;
+      border: 1px solid #ffeaa7;
+      padding: 15px;
+      border-radius: 5px;
+      margin: 15px 0;
+    }
+
+    .log {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      padding: 10px;
+      border-radius: 5px;
+      margin: 10px 0;
+      font-family: monospace;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .step {
+      background: #f8f9fa;
+      border-left: 4px solid #007bff;
+      padding: 10px;
+      margin: 10px 0;
+    }
+
+    h2 {
+      color: #333;
+      border-bottom: 2px solid #007bff;
+      padding-bottom: 5px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>webUpdateModel 更新逻辑测试</h1>
+    <p>测试每次推送数据时清除旧数据并重新生成所有牌子的逻辑</p>
+
+    <div class="info-box">
+      <h3>🎯 新的更新逻辑</h3>
+      <p><strong>之前</strong>：分别调用保存和更新方法</p>
+      <p><strong>现在</strong>：每次推送数据时：</p>
+      <ol>
+        <li>清除所有现有的设备牌子和CSS2D DOM元素</li>
+        <li>清除实例中的所有设备标签数据</li>
+        <li>保存新的数据到实例</li>
+        <li>基于新数组重新生成所有牌子</li>
+      </ol>
+    </div>
+
+    <div class="test-section">
+      <h2>1. 基础测试</h2>
+      <p>测试基本的清除和重新生成逻辑</p>
+
+      <button class="test-button" onclick="testBasicUpdate()">基础更新测试</button>
+      <button class="test-button" onclick="testEmptyArray()">空数组测试</button>
+
+      <div class="step">
+        <strong>测试步骤：</strong>
+        <ol>
+          <li>点击"基础更新测试"创建初始设备</li>
+          <li>点击"空数组测试"清除所有设备</li>
+          <li>观察控制台日志，验证清除和重新生成过程</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>2. 数据替换测试</h2>
+      <p>测试推送完全不同的设备数组</p>
+
+      <button class="test-button" onclick="testDataReplacement()">数据替换测试</button>
+      <button class="test-button" onclick="testProgressiveUpdate()">渐进更新测试</button>
+
+      <div class="step">
+        <strong>测试步骤：</strong>
+        <ol>
+          <li>点击"数据替换测试"推送第一组数据</li>
+          <li>2秒后自动推送完全不同的第二组数据</li>
+          <li>观察是否完全替换了之前的设备</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>3. 实例存储测试</h2>
+      <p>测试实例存储的清除和重新保存</p>
+
+      <button class="test-button" onclick="testInstanceStorage()">实例存储测试</button>
+      <button class="test-button" onclick="checkStorageStatus()">检查存储状态</button>
+
+      <div class="step">
+        <strong>测试步骤：</strong>
+        <ol>
+          <li>推送数据并检查存储状态</li>
+          <li>推送新数据，验证旧数据被清除</li>
+          <li>检查存储状态确认数据更新</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>4. 性能测试</h2>
+      <p>测试大量数据的清除和重新生成性能</p>
+
+      <button class="test-button" onclick="testPerformance()">性能测试</button>
+      <button class="test-button danger" onclick="clearAll()">清除所有</button>
+
+      <div class="warning-box">
+        <strong>⚠️ 注意：</strong>
+        <p>性能测试会创建大量设备，可能影响页面性能。测试完成后请点击"清除所有"。</p>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>控制台日志</h2>
+      <div id="log" class="log"></div>
+      <button class="test-button" onclick="clearLog()">清除日志</button>
+    </div>
+  </div>
+
+  <script>
+    // 重写 console.log 来捕获日志
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const logElement = document.getElementById('log');
+
+    function addToLog (message) {
+      logElement.textContent += message + '\n';
+      logElement.scrollTop = logElement.scrollHeight;
+    }
+
+    console.log = function (...args) {
+      originalLog.apply(console, args);
+      addToLog('[LOG] ' + args.join(' '));
+    };
+
+    console.warn = function (...args) {
+      originalWarn.apply(console, args);
+      addToLog('[WARN] ' + args.join(' '));
+    };
+
+    // 模拟 postMessage 发送
+    function sendMessage (cmd, param) {
+      const message = {
+        cmd: cmd,
+        param: param
+      };
+
+      // 发送到父窗口（如果存在）
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(message, '*');
+      }
+
+      // 也发送到当前窗口（用于测试）
+      window.postMessage(message, '*');
+
+      console.log('发送消息:', message);
+      addToLog(`[SEND] ${cmd}: ${JSON.stringify(param, null, 2)}`);
+    }
+
+    function testBasicUpdate () {
+      addToLog('=== 基础更新测试 ===');
+
+      const data = [
+        {
+          name: '基础测试设备1',
+          visible: true,
+          code: '001',
+          configs: [
+            { key: '测试类型', value: '基础更新' },
+            { key: '时间', value: new Date().toLocaleTimeString() }
+          ]
+        },
+        {
+          name: '基础测试设备2',
+          visible: true,
+          code: '002',
+          configs: [
+            { key: '测试类型', value: '基础更新' },
+            { key: '时间', value: new Date().toLocaleTimeString() }
+          ]
+        }
+      ];
+
+      sendMessage('webUpdateModel', data);
+    }
+
+    function testEmptyArray () {
+      addToLog('=== 空数组测试 ===');
+      sendMessage('webUpdateModel', []);
+    }
+
+    function testDataReplacement () {
+      addToLog('=== 数据替换测试 ===');
+
+      // 第一组数据
+      const firstData = [
+        {
+          name: '第一组设备A',
+          visible: true,
+          code: '001',
+          configs: [
+            { key: '组别', value: '第一组' },
+            { key: '状态', value: '运行中' }
+          ]
+        },
+        {
+          name: '第一组设备B',
+          visible: true,
+          code: '002',
+          configs: [
+            { key: '组别', value: '第一组' },
+            { key: '状态', value: '待机' }
+          ]
+        }
+      ];
+
+      sendMessage('webUpdateModel', firstData);
+
+      // 2秒后推送完全不同的数据
+      setTimeout(() => {
+        addToLog('=== 推送第二组数据 ===');
+        const secondData = [
+          {
+            name: '第二组设备X',
+            visible: true,
+            code: '003',
+            configs: [
+              { key: '组别', value: '第二组' },
+              { key: '状态', value: '正常' }
+            ]
+          },
+          {
+            name: '第二组设备Y',
+            visible: true,
+            code: '004',
+            configs: [
+              { key: '组别', value: '第二组' },
+              { key: '状态', value: '维护中' }
+            ]
+          }
+        ];
+
+        sendMessage('webUpdateModel', secondData);
+      }, 2000);
+    }
+
+    function testProgressiveUpdate () {
+      addToLog('=== 渐进更新测试 ===');
+
+      // 逐步增加设备数量
+      const steps = [
+        [{ name: '设备1', visible: true, code: '001', configs: [{ key: '步骤', value: '1个设备' }] }],
+        [
+          { name: '设备1', visible: true, code: '001', configs: [{ key: '步骤', value: '2个设备' }] },
+          { name: '设备2', visible: true, code: '002', configs: [{ key: '步骤', value: '2个设备' }] }
+        ],
+        [
+          { name: '设备1', visible: true, code: '001', configs: [{ key: '步骤', value: '3个设备' }] },
+          { name: '设备2', visible: true, code: '002', configs: [{ key: '步骤', value: '3个设备' }] },
+          { name: '设备3', visible: true, code: '003', configs: [{ key: '步骤', value: '3个设备' }] }
+        ]
+      ];
+
+      steps.forEach((data, index) => {
+        setTimeout(() => {
+          addToLog(`=== 步骤 ${index + 1}: ${data.length} 个设备 ===`);
+          sendMessage('webUpdateModel', data);
+        }, index * 1500);
+      });
+    }
+
+    function testInstanceStorage () {
+      addToLog('=== 实例存储测试 ===');
+
+      const data = [
+        {
+          name: '实例存储测试设备',
+          visible: true,
+          code: '001',
+          configs: [
+            { key: '存储测试', value: '已保存到实例' },
+            { key: '时间', value: new Date().toLocaleTimeString() }
+          ]
+        }
+      ];
+
+      sendMessage('webUpdateModel', data);
+
+      // 检查存储状态
+      setTimeout(() => {
+        sendMessage('checkStorageStatus', {});
+      }, 1000);
+    }
+
+    function checkStorageStatus () {
+      addToLog('=== 检查存储状态 ===');
+      sendMessage('checkStorageStatus', {});
+    }
+
+    function testPerformance () {
+      addToLog('=== 性能测试 ===');
+
+      // 创建大量设备数据
+      const devices = [];
+      for (let i = 1; i <= 20; i++) {
+        devices.push({
+          name: `性能测试设备${i}`,
+          visible: true,
+          code: `${i.toString().padStart(3, '0')}`,
+          configs: [
+            { key: '设备编号', value: `${i}` },
+            { key: '测试类型', value: '性能测试' },
+            { key: '时间', value: new Date().toLocaleTimeString() }
+          ]
+        });
+      }
+
+      sendMessage('webUpdateModel', devices);
+    }
+
+    function clearAll () {
+      addToLog('=== 清除所有数据 ===');
+      sendMessage('webUpdateModel', []);
+    }
+
+    function clearLog () {
+      logElement.textContent = '';
+    }
+  </script>
+</body>
+
+</html>
