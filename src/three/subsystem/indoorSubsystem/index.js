@@ -14,6 +14,7 @@ import { SpecialGround } from "../../../lib/blMeshes";
 import BoxModel from "../../../lib/boxModel";
 import { dynamicFade, fadeByTime } from "../../../shader";
 import { SceneHint } from "../../components/SceneHint";
+import { equipmentTreeManager } from "./equipmentTreeManager";
 
 let rightMouseupTime = 0;
 
@@ -59,7 +60,7 @@ export class IndoorSubsystem extends CustomSystem {
     console.log("this.sceneHint", this);
   }
 
-  onEnter(buildingName) {
+  async onEnter(buildingName) {
     // 如果是重新进入室内，先确保状态被正确重置
     if (this.building || this.buildingObject) {
       console.log("重新进入室内，重置状态");
@@ -79,6 +80,15 @@ export class IndoorSubsystem extends CustomSystem {
     this.sceneHint.show("右键双击返回室外");
 
     this.setIndoorHDRSky();
+
+    // 按需加载设备树数据
+    try {
+      console.log(`开始按需加载建筑 ${buildingName} 的设备树数据...`);
+      await equipmentTreeManager.getEquipmentTree(buildingName);
+      console.log(`建筑 ${buildingName} 设备树数据加载完成`);
+    } catch (error) {
+      console.error(`加载建筑 ${buildingName} 设备树数据失败:`, error);
+    }
 
     let obj = {
       name: buildingName,
@@ -167,20 +177,18 @@ export class IndoorSubsystem extends CustomSystem {
     });
   }
 
-  onChangeSystemCustom(state, floorName, buildingName) {
+  async onChangeSystemCustom(state, floorName, buildingName) {
     if (state === "outToIn") {
-      let a = this.onEnter(buildingName).then(() => {
-        this.changeFloor(floorName);
-      });
+      await this.onEnter(buildingName);
+      this.changeFloor(floorName);
     }
     if (state === "inToInSingle") {
       this.changeFloor(floorName);
     }
     if (state === "inToInOther") {
       this.clearIndoorData();
-      this.onEnter(buildingName).then(() => {
-        this.changeFloor(floorName);
-      });
+      await this.onEnter(buildingName);
+      this.changeFloor(floorName);
     }
   }
   onProgress(gltf, name) {

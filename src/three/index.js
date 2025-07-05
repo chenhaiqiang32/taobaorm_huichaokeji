@@ -141,7 +141,7 @@ export class Store3D extends CoreExtensions {
   }
 
   /**@description 各个系统模块切换 */
-  changeSystem(systemType, building = null) {
+  async changeSystem(systemType, building = null) {
     // 销毁fence
     this.clearFence();
     this.changeSystemCommon(systemType);
@@ -149,9 +149,9 @@ export class Store3D extends CoreExtensions {
     this.orientation.clearSearch();
 
     const targetSystem = this[systemType];
-    targetSystem.onEnter(building);
+    await targetSystem.onEnter(building);
   }
-  changeIndoor(name) {
+  async changeIndoor(name) {
     // 根据传入的建筑名称从配置中获取对应的路径和楼层信息
     const buildingConfig = window.floorToName[name];
 
@@ -182,7 +182,7 @@ export class Store3D extends CoreExtensions {
     }
 
     // 切换到室内系统
-    this.changeSystem("indoorSubsystem", buildingName);
+    await this.changeSystem("indoorSubsystem", buildingName);
 
     // 等待室内系统加载完成后切换到指定楼层
     // 使用 Promise 确保加载完成后再切换楼层
@@ -271,7 +271,7 @@ export class Store3D extends CoreExtensions {
    * @description 各个系统模块切换适用于搜索跟踪等情况下的切换
    * @param {string} sceneChangeType - 第一个参数切换状态
    */
-  changeSystemCustom(sceneChangeType, originId, sceneType) {
+  async changeSystemCustom(sceneChangeType, originId, sceneType) {
     // 执行切换系统
     const systemType =
       sceneType === Orientation.SCENE_TYPE.INDOOR
@@ -282,10 +282,10 @@ export class Store3D extends CoreExtensions {
     const targetSystem = this[systemType];
     if (sceneChangeType === "inToOut") {
       // 如果是 室内 => 室外 ，执行 onEnter 函数
-      targetSystem.onEnter();
+      await targetSystem.onEnter();
     } else {
       // 如果是另外情况， 执行以下方法
-      targetSystem.onChangeSystemCustom(
+      await targetSystem.onChangeSystemCustom(
         sceneChangeType,
         originId,
         originId.slice(0, -3)
@@ -420,13 +420,13 @@ export class Store3D extends CoreExtensions {
     //   this.hideBuildingDialog(currentSearchBuildingId); // 关闭建筑弹窗
   }
 
-  searchPerson(data) {
+  async searchPerson(data) {
     const { originId, sceneType, sceneChangeType, id } = data;
     if (sceneChangeType !== "noChange") {
       // 场景切换后执行搜索
-      this.changeSystemCustom(sceneChangeType, originId, sceneType);
+      await this.changeSystemCustom(sceneChangeType, originId, sceneType);
       this.crossSearch.setCrossSearchId = id;
-      this.crossSearch.setCrossSearchPersonStatus(true); // 记录跨场景的搜索
+      this.crossSearch.setCrossSearchStatus(true); // 记录跨场景的搜索
     } else {
       this.orientation.setSearchId(id);
       this.orientation.search();
@@ -460,20 +460,20 @@ export class Store3D extends CoreExtensions {
     }
   }
 
-  followChangeScene({ originId, sceneType, sceneChangeType, id }) {
-    this.changeSystemCustom(sceneChangeType, originId, sceneType);
+  async followChangeScene({ originId, sceneType, sceneChangeType, id }) {
+    await this.changeSystemCustom(sceneChangeType, originId, sceneType);
     this.crossSearch.setCrossFollowId = id;
     this.crossSearch.setCrossFollowStatus(true); // 记录跨场景的搜索
   }
 
-  startFollow(data) {
+  async startFollow(data) {
     this.postprocessing.clearOutlineAll(1);
 
     // 开始跟踪
     const { sceneChangeType, id } = data;
     if (sceneChangeType !== "noChange") {
       // 做了场景切换
-      this.followChangeScene(data);
+      await this.followChangeScene(data);
     }
     if (sceneChangeType === "noChange") {
       // 直接搜索
@@ -549,12 +549,12 @@ export class Store3D extends CoreExtensions {
     this.ground.clearDangerFence();
   }
 
-  personAlarmInit(data) {
+  async personAlarmInit(data) {
     const { originId, sceneType, sceneChangeType, id } = data;
     this.currentSystem.setDangerPerson(data); // 存储报警人员信息
     if (sceneChangeType !== "noChange") {
       // 做了场景切换
-      this.changeSystemCustom(sceneChangeType, originId, sceneType);
+      await this.changeSystemCustom(sceneChangeType, originId, sceneType);
       this.crossSearch.setCrossSearchDangerPersonStatus(true); // 记录跨场景的搜索
     }
     if (sceneChangeType === "noChange") {
@@ -611,13 +611,13 @@ export class Store3D extends CoreExtensions {
     }
   }
 
-  searchCamera(data) {
+  async searchCamera(data) {
     // 搜索相机
 
     const { originId, sceneType, sceneChangeType, id } = data;
     if (sceneChangeType !== "noChange") {
       // 做了场景切换
-      this.changeSystemCustom(sceneChangeType, originId, sceneType);
+      await this.changeSystemCustom(sceneChangeType, originId, sceneType);
       this.currentSystem.setSearchCameraId(id); // 记录搜索相机信息
     }
     if (sceneChangeType === "noChange") {
@@ -626,13 +626,13 @@ export class Store3D extends CoreExtensions {
     }
   }
 
-  searchInspectionSystem(data) {
+  async searchInspectionSystem(data) {
     // 搜索相机
 
     const { originId, sceneType, sceneChangeType, id } = data;
     if (sceneChangeType !== "noChange") {
       // 做了场景切换
-      this.changeSystemCustom(sceneChangeType, originId, sceneType);
+      await this.changeSystemCustom(sceneChangeType, originId, sceneType);
       this.currentSystem.setSearchInspectionSystemId(id); // 记录搜索相机信息
     }
     if (sceneChangeType === "noChange") {
@@ -641,7 +641,7 @@ export class Store3D extends CoreExtensions {
     }
   }
 
-  search(data) {
+  async search(data) {
     this.clearSearch(); // 清除现有搜索数据
 
     if (!data) return;
@@ -662,27 +662,28 @@ export class Store3D extends CoreExtensions {
       return false;
     }
 
-    if (type === "person") return this.searchPerson(data);
+    if (type === "person") return await this.searchPerson(data);
 
     if (type === "building") return this.searchBuilding(id);
 
-    if (type === "equip") return this.searchCamera(data);
+    if (type === "equip") return await this.searchCamera(data);
 
-    if (type === "inspection") return this.searchInspection(data);
+    if (type === "inspection") return await this.searchInspection(data);
 
-    if (type === "personDanger") return this.personAlarmInit(data);
+    if (type === "personDanger") return await this.personAlarmInit(data);
 
-    if (type === "inspectionSystem") return this.searchInspectionSystem(data);
+    if (type === "inspectionSystem")
+      return await this.searchInspectionSystem(data);
   }
 
-  searchInspection(data) {
+  async searchInspection(data) {
     // 搜索巡检
 
     const { originId, sceneType, sceneChangeType, id, name, position } = data;
     this.currentSystem.setSearchInspection({ id, name, position }); // 记录搜索信息
     if (sceneChangeType !== "noChange") {
       // 做了场景切换
-      this.changeSystemCustom(sceneChangeType, originId, sceneType);
+      await this.changeSystemCustom(sceneChangeType, originId, sceneType);
       this.crossSearch.setCrossSearchInspectionStatus(true); // 记录跨场景的搜索
     }
     if (sceneChangeType === "noChange") {

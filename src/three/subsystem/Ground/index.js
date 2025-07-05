@@ -32,11 +32,7 @@ import {
 import { modelProcess } from "../../processing";
 import { GatherOrSilentFence } from "../../components/business/fencePlate/gatherOrSilentFence";
 import { MeetingPointPlate } from "../../components/business/equipMentPlate/meetingPoint";
-import {
-  modelFiles,
-  buildingNames,
-  indoorModelFiles,
-} from "../../../assets/modelList";
+import { modelFiles, buildingNames } from "../../../assets/modelList";
 import { Tooltip } from "../../components/Tooltip";
 import { SceneHint } from "../../components/SceneHint";
 
@@ -157,7 +153,6 @@ export class Ground extends CustomSystem {
         },
         () => {
           console.log("✅ 所有模型加载完成");
-          this.handleIndoorEquipTree();
           this.initComponents(); // 在模型加载完成后初始化组件
           this.onLoaded();
         }
@@ -873,42 +868,7 @@ string} name
       super.updateOrientation();
     }); // 镜头动画结束后执行事件绑定
   }
-  handleIndoorEquipTree() {
-    // 将字符串数组转换为对象数组格式
-    const indoorModelObjects = indoorModelFiles.map((fileName) => ({
-      name: fileName.split(".")[0], // 去掉 .glb 后缀
-      path: `./models/inDoor/${fileName}`,
-      type: ".glb",
-    }));
-    let equipTree = {};
 
-    // 使用 Promise 来确保所有模型都加载完成后再推送数据
-    loadGLTF(
-      indoorModelObjects,
-      (gltf, name) => {
-        // 查找 name 为 "equip" 的子对象
-        const equipChild = gltf.scene.children.find(
-          (child) => child.name === "equip"
-        );
-
-        if (equipChild && equipChild.children) {
-          equipTree[`${name}`] = equipChild.children.map((child) => {
-            // 按 '_' 分割 name，第0项为id，最后一项为name
-            const nameParts = child.name.split("_");
-            return {
-              id: nameParts[0], // 第0项为id
-              name: nameParts[nameParts.length - 1], // 最后一项为name
-            };
-          });
-        }
-      },
-      () => {
-        // 所有模型加载完成后的回调
-        console.log("✅ 所有室内模型加载完成，推送设备树数据到前端");
-        web3dModelsGroup(equipTree);
-      }
-    );
-  }
   removeEventListener() {
     this.eventClear.forEach((clear) => clear());
     this.eventClear = [];
