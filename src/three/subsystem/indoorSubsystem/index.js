@@ -61,11 +61,7 @@ export class IndoorSubsystem extends CustomSystem {
   }
 
   async onEnter(buildingName) {
-    // 如果是重新进入室内，先确保状态被正确重置
-    if (this.building || this.buildingObject) {
-      console.log("重新进入室内，重置状态");
-      this.clearIndoorData();
-    }
+    // 注意：clearIndoorData 现在在 changeSystemCommon 中处理，避免重复清理
 
     if (this.core.ground && this.core.ground.hideAllBuildingLabel) {
       this.core.ground.hideAllBuildingLabel();
@@ -219,7 +215,32 @@ export class IndoorSubsystem extends CustomSystem {
       child.material.depthWrite = true;
     }
 
-    child.material = child.material.clone();
+    // 改进材质克隆逻辑，避免累积过多纹理
+    const originalMaterial = child.material;
+    child.material = originalMaterial.clone();
+
+    // 确保新材质有正确的纹理引用
+    const textureProperties = [
+      "map",
+      "normalMap",
+      "emissiveMap",
+      "specularMap",
+      "roughnessMap",
+      "metalnessMap",
+      "alphaMap",
+      "envMap",
+      "lightMap",
+      "aoMap",
+      "displacementMap",
+      "bumpMap",
+    ];
+
+    textureProperties.forEach((prop) => {
+      if (originalMaterial[prop]) {
+        child.material[prop] = originalMaterial[prop];
+      }
+    });
+
     child.material.transparent = true;
     child.material.metalness = 0.2;
     child.material.roughness = 0.8;
@@ -344,10 +365,10 @@ export class IndoorSubsystem extends CustomSystem {
       this.core.onRenderQueue.delete("indoorSubsystem");
     }
 
-    this.clearIndoorHDR();
-    this.removeIndoorLights();
+    // 执行完整的清理操作
+    this.clearIndoorData();
 
-    this.dispose();
+    console.log("室内系统 onLeave 完成");
   }
   addEventListener() {
     this.addRayDbClick();
@@ -657,8 +678,39 @@ export class IndoorSubsystem extends CustomSystem {
     this.resetEffect();
   }
   dispose() {
+    console.log("开始 dispose 室内系统...");
+
     this.currentFloor = null;
-    this.buildingObject = {};
+
+    // 彻底清理建筑对象和材质
+    if (this.buildingObject) {
+      Object.values(this.buildingObject).forEach((obj) => {
+        if (obj.group) {
+          // 遍历所有网格并清理材质
+          obj.group.traverse((child) => {
+            if (child.isMesh && child.material) {
+              // 清理材质
+              if (Array.isArray(child.material)) {
+                child.material.forEach((material) => {
+                  this.disposeMaterial(material);
+                });
+              } else {
+                this.disposeMaterial(material);
+              }
+              child.material = null;
+            }
+            // 清理几何体
+            if (child.geometry) {
+              child.geometry.dispose();
+            }
+          });
+          // 从场景中移除
+          this.scene.remove(obj.group);
+        }
+      });
+      this.buildingObject = {};
+    }
+
     this.removeEventListener();
     this.resetData();
     this.scene.dispose();
@@ -679,6 +731,24 @@ export class IndoorSubsystem extends CustomSystem {
     }
 
     this.removeLightHelpers();
+
+    // 强制垃圾回收提示
+    if (window.gc) {
+      window.gc();
+    }
+
+    // 监控WebGL资源使用情况
+    if (this.core && this.core.logWebGLResources) {
+      console.log("dispose后的WebGL资源使用情况:");
+      this.core.logWebGLResources();
+    }
+
+    // 清理纹理管理器
+    if (this.core && this.core.textureManager) {
+      this.core.textureManager.clearAll();
+    }
+
+    console.log("室内系统 dispose 完成");
   }
 
   /**
@@ -903,6 +973,8 @@ export class IndoorSubsystem extends CustomSystem {
    * 清理室内系统数据（用于室内切换时的清理）
    */
   clearIndoorData() {
+    console.log("开始清理室内系统数据...");
+
     this.removeEventListener();
     this.resetData();
     this.disposeGatherOrSilent();
@@ -932,6 +1004,35 @@ export class IndoorSubsystem extends CustomSystem {
       this.boxModelGround = null;
     }
 
+    // 彻底清理建筑对象和材质
+    if (this.buildingObject) {
+      Object.values(this.buildingObject).forEach((obj) => {
+        if (obj.group) {
+          // 遍历所有网格并清理材质
+          obj.group.traverse((child) => {
+            if (child.isMesh && child.material) {
+              // 清理材质
+              if (Array.isArray(child.material)) {
+                child.material.forEach((material) => {
+                  this.disposeMaterial(material);
+                });
+              } else {
+                this.disposeMaterial(child.material);
+              }
+              child.material = null;
+            }
+            // 清理几何体
+            if (child.geometry) {
+              child.geometry.dispose();
+            }
+          });
+          // 从场景中移除
+          this.scene.remove(obj.group);
+        }
+      });
+      this.buildingObject = {};
+    }
+
     if (this.building && this.building.parent) {
       this.building.parent.remove(this.building);
       this.building = null;
@@ -945,6 +1046,65 @@ export class IndoorSubsystem extends CustomSystem {
     this.resetControls();
     this.clearIndoorHDR();
     this.removeIndoorLights();
+
+    // 强制垃圾回收提示
+    if (window.gc) {
+      window.gc();
+    }
+
+    // 监控WebGL资源使用情况
+    if (this.core && this.core.logWebGLResources) {
+      console.log("清理后的WebGL资源使用情况:");
+      this.core.logWebGLResources();
+    }
+
+    // 清理纹理管理器
+    if (this.core && this.core.textureManager) {
+      this.core.textureManager.clearAll();
+    }
+
+    console.log("室内系统数据清理完成");
+  }
+
+  /**
+   * 彻底清理材质及其纹理
+   * @param {THREE.Material} material 要清理的材质
+   */
+  disposeMaterial(material) {
+    if (!material) return;
+
+    // 清理材质的所有纹理
+    const textureProperties = [
+      "map",
+      "normalMap",
+      "emissiveMap",
+      "specularMap",
+      "roughnessMap",
+      "metalnessMap",
+      "alphaMap",
+      "envMap",
+      "lightMap",
+      "aoMap",
+      "displacementMap",
+      "bumpMap",
+    ];
+
+    textureProperties.forEach((prop) => {
+      if (material[prop]) {
+        // 使用纹理管理器清理纹理
+        if (this.core && this.core.textureManager) {
+          const textureKey = `${material.name || "unknown"}_${prop}`;
+          this.core.textureManager.removeTexture(textureKey);
+        } else {
+          // 备用方案：直接清理
+          material[prop].dispose();
+        }
+        material[prop] = null;
+      }
+    });
+
+    // 清理材质本身
+    material.dispose();
   }
 
   /**
@@ -956,6 +1116,9 @@ export class IndoorSubsystem extends CustomSystem {
       console.warn("建筑对象未提供，无法创建和设置灯光");
       return;
     }
+
+    // 先清理现有的灯光
+    this.removeIndoorLights();
 
     const box = new THREE.Box3().setFromObject(building);
     const center = box.getCenter(new THREE.Vector3());
@@ -1007,6 +1170,15 @@ export class IndoorSubsystem extends CustomSystem {
 
     this.directionLight = directionalLight;
     this._add(this.directionLight);
+
+    // 将灯光存储到 lights 对象中，便于管理
+    this.lights = {
+      ambient: this.ambientLight,
+      main: this.directionLight,
+      auxiliary: null,
+    };
+
+    console.log("室内灯光创建完成");
   }
 
   /**
@@ -1015,6 +1187,7 @@ export class IndoorSubsystem extends CustomSystem {
   removeIndoorLights() {
     this.removeLightHelpers();
 
+    // 清理 this.lights 对象中的灯光
     if (this.lights) {
       if (this.lights.ambient) {
         this.scene.remove(this.lights.ambient);
@@ -1039,9 +1212,50 @@ export class IndoorSubsystem extends CustomSystem {
       this.lights = null;
     }
 
-    this.ambientLight = null;
-    this.directionLight = null;
-    this.auxiliaryLight = null;
+    // 清理直接添加到场景中的灯光
+    if (this.ambientLight) {
+      this.scene.remove(this.ambientLight);
+      this.ambientLight.dispose();
+      this.ambientLight = null;
+    }
+
+    if (this.directionLight) {
+      // 移除方向光的目标点
+      if (this.directionLight.target) {
+        this.scene.remove(this.directionLight.target);
+      }
+      this.scene.remove(this.directionLight);
+      this.directionLight.dispose();
+      this.directionLight = null;
+    }
+
+    if (this.auxiliaryLight) {
+      // 移除辅助光的目标点
+      if (this.auxiliaryLight.target) {
+        this.scene.remove(this.auxiliaryLight.target);
+      }
+      this.scene.remove(this.auxiliaryLight);
+      this.auxiliaryLight.dispose();
+      this.auxiliaryLight = null;
+    }
+
+    // 清理场景中所有剩余的灯光
+    const lightsToRemove = [];
+    this.scene.traverse((object) => {
+      if (object.isLight) {
+        lightsToRemove.push(object);
+      }
+    });
+
+    lightsToRemove.forEach((light) => {
+      console.log("清理场景中的灯光:", light.type, light.name || "unnamed");
+      this.scene.remove(light);
+      if (light.dispose) {
+        light.dispose();
+      }
+    });
+
+    console.log("室内灯光清理完成");
   }
 
   // 新增：清理楼层射线检测事件

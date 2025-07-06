@@ -71,6 +71,12 @@ export const onMessage = async () => {
   // 等待 Store3D 实例初始化完成
   const core = await waitForStore3D();
 
+  // 添加防抖机制，避免频繁的场景切换
+  let changeSceneTimeout = null;
+  let lastChangeSceneParam = null;
+  let lastChangeSceneTime = 0; // 记录上一次场景切换的时间
+  let isChangingScene = false; // 标记是否正在切换场景
+
   window.addEventListener("message", (event) => {
     if (!core) {
       console.warn("Store3D 实例尚未初始化");
@@ -114,16 +120,50 @@ export const onMessage = async () => {
           break;
         }
         case "changeScene": {
-          if (event.data.param === "地面") {
-            core.changeSystem("ground");
-          } else {
-            const nameToType = {
-              制冷: "AFS9512042_制冷",
-              制热: "AFS9512043_制热",
-              配电: "AFS9512044_配电室",
-            };
-            core.changeSystem("indoorSubsystem", nameToType[event.data.param]);
+          // 防抖处理：如果参数相同且时间间隔很短，则忽略
+          const currentParam = event.data.param;
+          const now = Date.now();
+
+          // 如果正在切换场景，直接忽略
+          if (isChangingScene) {
+            console.log("正在切换场景，忽略重复请求:", currentParam);
+            return;
           }
+
+          if (changeSceneTimeout) {
+            clearTimeout(changeSceneTimeout);
+          }
+
+          if (
+            lastChangeSceneParam === currentParam &&
+            now - (lastChangeSceneTime || 0) < 1000 // 增加到1秒
+          ) {
+            console.log("忽略重复的场景切换请求:", currentParam);
+            return;
+          }
+
+          lastChangeSceneParam = currentParam;
+          lastChangeSceneTime = now;
+          isChangingScene = true;
+
+          changeSceneTimeout = setTimeout(() => {
+            console.log("执行场景切换:", currentParam);
+            if (currentParam === "地面") {
+              core.changeSystem("ground");
+            } else {
+              const nameToType = {
+                制冷: "AFS9512042_制冷",
+                制热: "AFS9512043_制热",
+                配电: "AFS9512044_配电室",
+              };
+              core.changeSystem("indoorSubsystem", nameToType[currentParam]);
+            }
+
+            // 切换完成后重置标记
+            setTimeout(() => {
+              isChangingScene = false;
+            }, 500); // 500ms后允许下一次切换
+          }, 200); // 增加到200ms防抖延迟
           break;
         }
         case "setWanderState": {

@@ -12,14 +12,11 @@ import { GUI } from "three/examples/jsm/libs/lil-gui.module.min";
 
 import { Compass } from "../../lib/Compass";
 
-
-
 const memory = new MemoryManager();
 THREE.Object3D.prototype.deleteSelf = function (removeFromParent) {
   memory.track(this);
   memory.dispose(removeFromParent);
 };
-
 
 const _$vec3 = new THREE.Vector3();
 /**
@@ -27,14 +24,14 @@ const _$vec3 = new THREE.Vector3();
  */
 THREE.Vector3.prototype.clampSphere = function (sphere) {
   if (this.distanceTo(sphere.center) > sphere.radius) {
-    _$vec3.subVectors(this,sphere.center).normalize();
+    _$vec3.subVectors(this, sphere.center).normalize();
     _$vec3.setLength(sphere.radius);
-    this.addVectors(sphere.center,_$vec3);
+    this.addVectors(sphere.center, _$vec3);
   }
 };
 
 //
-const { innerWidth,innerHeight,devicePixelRatio } = window;
+const { innerWidth, innerHeight, devicePixelRatio } = window;
 
 export class CoreBase {
   /**@type { THREE.Scene } 场景 */
@@ -142,6 +139,40 @@ export class CoreBase {
     THREE.Cache.enabled = bool;
   }
 
+  /**
+   * 纹理管理器 - 用于管理WebGL纹理资源
+   */
+  #textureManager = {
+    textures: new Map(),
+    addTexture: function (key, texture) {
+      if (this.textures.has(key)) {
+        // 如果已存在，先清理旧的
+        const oldTexture = this.textures.get(key);
+        if (oldTexture && oldTexture !== texture) {
+          oldTexture.dispose();
+        }
+      }
+      this.textures.set(key, texture);
+    },
+    removeTexture: function (key) {
+      const texture = this.textures.get(key);
+      if (texture) {
+        texture.dispose();
+        this.textures.delete(key);
+      }
+    },
+    clearAll: function () {
+      this.textures.forEach((texture) => {
+        texture.dispose();
+      });
+      this.textures.clear();
+    },
+  };
+
+  get textureManager() {
+    return this.#textureManager;
+  }
+
   #animationFrameCode;
 
   get renderEnabled() {
@@ -169,14 +200,19 @@ export class CoreBase {
     this.#scene = new THREE.Scene();
     this.baseScene = this.#scene;
 
-    this.#camera = new THREE.PerspectiveCamera(50,innerWidth / innerHeight,0.01,20000);
+    this.#camera = new THREE.PerspectiveCamera(
+      50,
+      innerWidth / innerHeight,
+      0.01,
+      20000
+    );
     this.#baseCamera = this.#camera;
-    this.#camera.position.set(0,100,100);
-    this.#camera.lookAt(0,0,0);
+    this.#camera.position.set(0, 100, 100);
+    this.#camera.lookAt(0, 0, 0);
 
     this.#compass = new Compass(this);
     this.#compass.theta = 27.6;
-    this.#onresizeQueue.set("compass",this.#compass.resize);
+    this.#onresizeQueue.set("compass", this.#compass.resize);
 
     /**@type {THREE.WebGLRendererParameters} */
     const webGLRendererParameters = {
@@ -196,10 +232,10 @@ export class CoreBase {
       console.log("create canvas");
     }
     this.#domElement = webGLRendererParameters.canvas;
-    this.#domElement.oncontextmenu = e => false;
+    this.#domElement.oncontextmenu = (e) => false;
 
     this.#renderer = new THREE.WebGLRenderer(webGLRendererParameters);
-    this.#renderer.setSize(innerWidth,innerHeight);
+    this.#renderer.setSize(innerWidth, innerHeight);
     this.#renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.#renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.#renderer.shadowMap.enabled = true;
@@ -208,48 +244,48 @@ export class CoreBase {
     this.#renderer.domElement.removeAttribute("data-engine");
     this.#renderer.info.autoReset = false;
 
-    this.#controls = new OrbitControls(this.#camera,this.#renderer.domElement);
-    this.#controls.target.set(0,0,0);
+    this.#controls = new OrbitControls(this.#camera, this.#renderer.domElement);
+    this.#controls.target.set(0, 0, 0);
     this.#controls.enableDamping = true;
     this.#controls.enableDolly = false;
     this.#controls.dampingFactor = 0.2;
     this.#controls.data = {};
 
-    this.#onRenderQueue.set(Symbol(),param => param.controls.update());
+    this.#onRenderQueue.set(Symbol(), (param) => param.controls.update());
 
     this.#initLight();
 
     document.oncontextmenu = () => false;
 
-    window.addEventListener("resize",() => {
-      const { innerWidth,innerHeight } = window;
+    window.addEventListener("resize", () => {
+      const { innerWidth, innerHeight } = window;
 
       this.#camera.aspect = innerWidth / innerHeight;
       this.#camera.updateProjectionMatrix();
-      this.#renderer.setSize(innerWidth,innerHeight);
+      this.#renderer.setSize(innerWidth, innerHeight);
       this.#renderer.setPixelRatio(window.devicePixelRatio);
 
-      this.#onresizeQueue.forEach(fn => fn(innerWidth,innerHeight));
+      this.#onresizeQueue.forEach((fn) => fn(innerWidth, innerHeight));
     });
   }
 
   #initLight() {
-    const ambientLight = new THREE.AmbientLight(0xffffff,0.55); // 线性SRG
-    const directionalLight = new THREE.DirectionalLight(0xffffff,3);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.55); // 线性SRG
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 3);
     directionalLight.shadow.camera.near = 1;
     directionalLight.shadow.camera.far = 1500;
     directionalLight.shadow.camera.right = 500;
     directionalLight.shadow.camera.left = -500;
     directionalLight.shadow.camera.top = 500;
     directionalLight.shadow.camera.bottom = -500;
-    directionalLight.shadow.mapSize.width = Math.pow(2,13); //8192;
-    directionalLight.shadow.mapSize.height = Math.pow(2,13);
+    directionalLight.shadow.mapSize.width = Math.pow(2, 13); //8192;
+    directionalLight.shadow.mapSize.height = Math.pow(2, 13);
     directionalLight.shadow.blurSamples = 16;
 
     // directionalLight.shadow.radius = 1.1;
     directionalLight.shadow.bias = -0.00025;
 
-    directionalLight.position.set(30,385,585);
+    directionalLight.position.set(30, 385, 585);
     directionalLight.castShadow = true;
 
     this.#ambientLight = ambientLight;
@@ -262,11 +298,15 @@ export class CoreBase {
 
   /**@param {THREE.Scene} scene 设置默认灯光*/
   setDefaultLight(scene) {
-    scene._add(this.#ambientLight.clone(),this.#directionLight.clone());
+    scene._add(this.#ambientLight.clone(), this.#directionLight.clone());
   }
 
   initComposer() {
-    this.#postprocessing = new Postprocessing(this.#renderer,this.#scene,this.#camera);
+    this.#postprocessing = new Postprocessing(
+      this.#renderer,
+      this.#scene,
+      this.#camera
+    );
     this.postprocessing.hueSaturationEffect.saturation = 0.25;
     this.postprocessing.brightnessContrastEffect.contrast = 0.25;
 
@@ -283,7 +323,7 @@ export class CoreBase {
     //   this.postprocessing.brightnessContrastEffect.contrast = value;
     // });
 
-    this.#onresizeQueue.set(Symbol(),this.#postprocessing.resize);
+    this.#onresizeQueue.set(Symbol(), this.#postprocessing.resize);
   }
 
   initStats() {
@@ -291,7 +331,7 @@ export class CoreBase {
     document.body.appendChild(this.#stats.dom);
     // this.#stats.dom.style.left = "400px";
     // this.#stats.dom.style.top = "400px";
-    this.#onRenderQueue.set(Symbol(),param => param.#stats.update());
+    this.#onRenderQueue.set(Symbol(), (param) => param.#stats.update());
   }
   initGridHelper() {
     const gridHelper = new THREE.GridHelper(100);
@@ -308,7 +348,7 @@ export class CoreBase {
     this.delta = this.clock.getDelta();
     this.elapsedTime = this.clock.getElapsedTime();
 
-    this.#onRenderQueue.forEach(fn => fn(this));
+    this.#onRenderQueue.forEach((fn) => fn(this));
 
     this.#renderer.info.reset();
     // console.log(this.#renderer.info);
@@ -320,7 +360,113 @@ export class CoreBase {
   }
 
   logMemory() {
-    console.log(this.#renderer.info.memory.geometries,this.#renderer.info.memory.textures);
+    console.log(
+      this.#renderer.info.memory.geometries,
+      this.#renderer.info.memory.textures
+    );
+  }
+
+  /**
+   * 监控WebGL资源使用情况
+   */
+  logWebGLResources() {
+    const info = this.#renderer.info;
+    console.log("=== WebGL资源使用情况 ===");
+    console.log("几何体数量:", info.memory.geometries);
+    console.log("纹理数量:", info.memory.textures);
+    console.log("着色器程序数量:", info.programs?.length || 0);
+    console.log("渲染调用次数:", info.render.calls);
+    console.log("三角形数量:", info.render.triangles);
+    console.log("点数量:", info.render.points);
+    console.log("线数量:", info.render.lines);
+    console.log("========================");
+  }
+
+  /**
+   * 强制清理WebGL资源
+   */
+  forceCleanupWebGLResources() {
+    console.log("=== 开始强制清理WebGL资源 ===");
+
+    // 清理纹理管理器
+    if (this.textureManager) {
+      this.textureManager.clearAll();
+    }
+
+    // 清理场景中的所有对象
+    if (this.scene) {
+      this.scene.traverse((object) => {
+        if (object.isMesh) {
+          // 清理几何体
+          if (object.geometry) {
+            object.geometry.dispose();
+          }
+
+          // 清理材质
+          if (object.material) {
+            if (Array.isArray(object.material)) {
+              object.material.forEach((material) => {
+                this.disposeMaterial(material);
+              });
+            } else {
+              this.disposeMaterial(object.material);
+            }
+          }
+        }
+
+        // 清理灯光
+        if (object.isLight) {
+          this.scene.remove(object);
+          if (object.dispose) {
+            object.dispose();
+          }
+        }
+      });
+    }
+
+    // 重置渲染器信息
+    this.#renderer.info.reset();
+
+    // 强制垃圾回收
+    if (window.gc) {
+      window.gc();
+    }
+
+    console.log("=== WebGL资源强制清理完成 ===");
+    this.logWebGLResources();
+  }
+
+  /**
+   * 清理单个材质
+   */
+  disposeMaterial(material) {
+    if (!material) return;
+
+    // 清理材质的所有纹理
+    const textureProperties = [
+      "map",
+      "normalMap",
+      "emissiveMap",
+      "specularMap",
+      "roughnessMap",
+      "metalnessMap",
+      "alphaMap",
+      "envMap",
+      "lightMap",
+      "aoMap",
+      "displacementMap",
+      "bumpMap",
+    ];
+
+    textureProperties.forEach((prop) => {
+      if (material[prop]) {
+        material[prop].dispose();
+        material[prop] = null;
+      }
+    });
+
+    // 清理材质本身
+    material.dispose();
   }
 
   render() {
@@ -328,7 +474,7 @@ export class CoreBase {
       this.#postprocessing.composer.render();
     } else {
       this.#renderer.autoClear = true;
-      this.#renderer.render(this.#scene,this.#camera);
+      this.#renderer.render(this.#scene, this.#camera);
     }
 
     this.#compass.update(this);
