@@ -596,6 +596,25 @@ export class Store3D extends CoreExtensions {
   }
 
   /**
+   * 设置自转功能
+   * @param {boolean} enabled - true开启自转，false关闭自转
+   */
+  setAutoRotate(enabled) {
+    console.log(`设置自转功能: ${enabled ? "开启" : "关闭"}`);
+
+    if (enabled) {
+      // 开启自转
+      this.controls.autoRotate = true;
+      this.controls.autoRotateSpeed = 2.0; // 设置自转速度
+      console.log("自转功能已开启");
+    } else {
+      // 关闭自转
+      this.controls.autoRotate = false;
+      console.log("自转功能已关闭");
+    }
+  }
+
+  /**
    *
    * @param {String} data originId
    * @param {Boolean} showVisible 未建模的建筑false

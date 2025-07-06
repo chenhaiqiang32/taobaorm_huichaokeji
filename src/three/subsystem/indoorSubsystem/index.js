@@ -1372,6 +1372,54 @@ export class IndoorSubsystem extends CustomSystem {
     this._indoorRaycastClearFns.push(rightEvt);
   }
 
+  /**
+   * 重置室内视角
+   */
+  resetCamera() {
+    console.log("重置室内视角...");
+
+    // 清除轮廓
+    this.core.postprocessing.clearOutlineAll(1);
+    this.core.postprocessing.clearOutlineAll(2);
+
+    // 如果有当前楼层，恢复该楼层所有设备的显示和原始材质
+    if (this.currentFloor && this.buildingObject[this.currentFloor.name]) {
+      const children =
+        this.buildingObject[this.currentFloor.name].group.children;
+
+      // 恢复全部显示和原始材质
+      children.forEach((obj) => {
+        obj.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            // 恢复原始材质
+            if (child._originalMaterial) {
+              child.material = child._originalMaterial;
+            } else {
+              // 如果没有保存原始材质，则重置为默认状态
+              child.material.wireframe = false;
+              child.material.transparent = false;
+            }
+            child.visible = true;
+          }
+        });
+      });
+
+      // 视角复位到切换楼层时的位置
+      this.cameraMoveToFloor(
+        this.buildingObject[this.currentFloor.name].group
+      ).then(() => {
+        console.log("室内视角重置完成");
+      });
+    } else {
+      // 如果没有当前楼层，执行默认的相机移动
+      if (this.building) {
+        this.cameraMove(this.building).then(() => {
+          console.log("室内视角重置完成（默认位置）");
+        });
+      }
+    }
+  }
+
   // 递归查找typeName为'device'的对象
   getDeviceObject(obj) {
     if (!obj) return null;

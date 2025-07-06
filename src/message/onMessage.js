@@ -297,13 +297,17 @@ export const onMessage = async () => {
           break;
         } // 围栏列表
 
-        case "cancelDrawFence": {
-          // 清除围栏
-          core.clearFence();
-          const resetCamera = core.currentSystem.resetCamera
-            ? core.currentSystem.resetCamera.bind(core.currentSystem)
-            : null;
-          resetCamera && resetCamera();
+        case "resetCamera": {
+          // 执行重置视角功能
+          console.log("执行重置视角功能");
+          core.resetCamera();
+          break;
+        }
+        case "autoRoute": {
+          // 开启关闭自转功能
+          const enabled = event.data.param; // true开启自转，false关闭自转
+          console.log(`收到自转控制命令: ${enabled ? "开启" : "关闭"}`);
+          core.setAutoRotate(enabled);
           break;
         }
         case "startSearch": {
