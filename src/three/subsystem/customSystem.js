@@ -1,6 +1,5 @@
 import { Subsystem } from "./Subsystem";
 import EquipMentPlate from "../components/business/equipMentPlate/index";
-import Store3D from "../../main";
 import { typeName } from "../components/Orientation/Orientation";
 
 export class CustomSystem extends Subsystem {
@@ -12,7 +11,6 @@ export class CustomSystem extends Subsystem {
 
     this.orientation = core.orientation;
     this.core = core;
-
   }
   clearPerson() {
     // 清除所有的人
@@ -23,17 +21,23 @@ export class CustomSystem extends Subsystem {
     this.orientation.setFollowId(id);
     this.orientation.startFollow();
   }
-  processingEquipData(data,type) {
-    EquipMentPlate.dataProcess(data,type).then(data => {
+  processingEquipData(data, type) {
+    EquipMentPlate.dataProcess(data, type).then((data) => {
       // 摄像头加载完毕后
       if (type === "camera" && EquipMentPlate.searchCameraIdNeed) {
         // 存在搜索的相机
-        EquipMentPlate.searchEquip(EquipMentPlate.searchCameraIdNeed,"camera");
+        EquipMentPlate.searchEquip(EquipMentPlate.searchCameraIdNeed, "camera");
         EquipMentPlate.searchCameraIdNeed = null;
       }
-      if (type === "inspectionSystem" && EquipMentPlate.searchInspectionSystemNeed) {
+      if (
+        type === "inspectionSystem" &&
+        EquipMentPlate.searchInspectionSystemNeed
+      ) {
         // 存在搜索的巡检系统
-        EquipMentPlate.searchEquip(EquipMentPlate.searchInspectionSystemNeed,"inspectionSystem");
+        EquipMentPlate.searchEquip(
+          EquipMentPlate.searchInspectionSystemNeed,
+          "inspectionSystem"
+        );
         EquipMentPlate.searchInspectionSystemNeed = null;
       }
     });
@@ -67,40 +71,37 @@ export class CustomSystem extends Subsystem {
       [typeName[1]]: false,
       [typeName[2]]: false,
     };
-    data.forEach(str => {
+    data.forEach((str) => {
       filterRules[str] = true;
     });
-
 
     EquipMentPlate.setCherryArray(data);
     this.orientation.filterByRule(filterRules);
     EquipMentPlate.cherryPick(data);
-    Store3D.ground.meetingPoint.setCherryArray(data);
-    Store3D.ground.meetingPoint.cherryPick();
-    Store3D.ground.escapeRoute.setCherryArray(data);
-    Store3D.ground.escapeRoute.cherryPick();
+    this.core.ground.meetingPoint.setCherryArray(data);
+    this.core.ground.meetingPoint.cherryPick();
+    this.core.ground.escapeRoute.setCherryArray(data);
+    this.core.ground.escapeRoute.cherryPick();
     this.core.ground.setFilterBuilding(data);
     this.core.ground.filterBuildingNum();
-
   }
   setSearchInspection(data) {
     EquipMentPlate.setSearchInspection(data);
   }
-  setFollowPersonIdNeed(id) {
-  }
+  setFollowPersonIdNeed(id) {}
   searchCamera(data) {
     // 搜索相机
-    EquipMentPlate.searchEquip(data,"camera");
+    EquipMentPlate.searchEquip(data, "camera");
   }
   searchInspectionSystem(data) {
     // 搜索相机
-    EquipMentPlate.searchEquip(data,"inspectionSystem");
+    EquipMentPlate.searchEquip(data, "inspectionSystem");
   }
   searchInspection() {
     const data = EquipMentPlate.searchInspection;
     // 搜索巡检
-    EquipMentPlate.dataProcess([data],"inspection"); // 插入巡检
-    EquipMentPlate.searchEquip(data.id,"inspection"); // 搜索巡检
+    EquipMentPlate.dataProcess([data], "inspection"); // 插入巡检
+    EquipMentPlate.searchEquip(data.id, "inspection"); // 搜索巡检
     EquipMentPlate.searchInspection = null;
   }
   getSearchPersonId() {

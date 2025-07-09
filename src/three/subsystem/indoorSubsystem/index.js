@@ -66,6 +66,10 @@ export class IndoorSubsystem extends CustomSystem {
     if (this.core.ground && this.core.ground.hideAllBuildingLabel) {
       this.core.ground.hideAllBuildingLabel();
     }
+
+    // 设置室内相机控制参数
+    this.handleControls();
+
     this.currentPoint = null;
     EquipmentPlate.onLoad(this, this.core);
 
@@ -92,7 +96,6 @@ export class IndoorSubsystem extends CustomSystem {
       type: ".glb",
     };
     this.buildingName = buildingName;
-
     return loadGLTF(
       [obj],
       this.onProgress.bind(this),
@@ -167,9 +170,19 @@ export class IndoorSubsystem extends CustomSystem {
     );
   }
 
+  handleControls() {
+    Reflect.ownKeys(controlsParameters).forEach((key) => {
+      this.controls.data = this.controls.data || {};
+      this.controls.data[key] = this.controls[key];
+      this.controls[key] = controlsParameters[key];
+    });
+  }
+
   resetControls() {
     Reflect.ownKeys(controlsParameters).forEach((key) => {
-      this.controls[key] = this.controls.data[key];
+      if (this.controls.data && this.controls.data[key] !== undefined) {
+        this.controls[key] = this.controls.data[key];
+      }
     });
   }
 
@@ -262,7 +275,6 @@ export class IndoorSubsystem extends CustomSystem {
   onLoaded() {
     // 重新计算地面范围
     this.recreateGround();
-
     this.createAndSetupLights(this.building);
 
     if (this.scene.environment) {
@@ -285,7 +297,7 @@ export class IndoorSubsystem extends CustomSystem {
       target = center;
       position = new THREE.Vector3();
       const _distance = this.camera.position.distanceTo(center);
-      const alpha = (_distance - Math.sqrt(radius) * 8) / _distance;
+      const alpha = (_distance - Math.sqrt(radius) * 2) / _distance;
       position.lerpVectors(this.camera.position, center, alpha);
 
       this.tweenControl.changeTo({
@@ -323,7 +335,7 @@ export class IndoorSubsystem extends CustomSystem {
       const position = new THREE.Vector3(
         center.x,
         center.y + floorHeight + cameraDistance * 0.8,
-        center.z + cameraDistance * 0.6
+        center.z + cameraDistance * 1.2
       );
 
       this.tweenControl.changeTo({

@@ -1,10 +1,9 @@
 const LoadingDOM = document.createElement("div");
 LoadingDOM.style.position = "fixed";
 LoadingDOM.style.zIndex = "9";
-LoadingDOM.style.top = "0px";
-LoadingDOM.style.left = "0px";
-LoadingDOM.style.width = "100%";
-LoadingDOM.style.height = "100%";
+LoadingDOM.style.top = "50%";
+LoadingDOM.style.left = "50%";
+LoadingDOM.style.transform = "translate(-50%, -50%)";
 LoadingDOM.style.display = "none";
 LoadingDOM.style.textAlign = "center";
 LoadingDOM.style.flexDirection = "column";

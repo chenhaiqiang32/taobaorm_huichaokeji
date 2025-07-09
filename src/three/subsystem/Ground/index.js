@@ -35,6 +35,7 @@ import { MeetingPointPlate } from "../../components/business/equipMentPlate/meet
 import { modelFiles, buildingNames } from "../../../assets/modelList";
 import { Tooltip } from "../../components/Tooltip";
 import { SceneHint } from "../../components/SceneHint";
+import { BuildingHoverRings } from "../../../lib/BuildingHoverRings";
 
 // 获取模型文件列表
 async function getModelFiles() {
@@ -125,6 +126,10 @@ export class Ground extends CustomSystem {
     // 初始化场景提示
     this.sceneHint = new SceneHint();
 
+    // 初始化建筑悬停环形圆圈
+    this.buildingHoverRings = new BuildingHoverRings();
+    this.scene.add(this.buildingHoverRings);
+
     this.init();
   }
 
@@ -189,7 +194,7 @@ export class Ground extends CustomSystem {
 
     // 设置渲染队列
     if (this.core && this.core.onRenderQueue) {
-      this.core.onRenderQueue.set(ground, this.update.bind(this));
+      this.core.onRenderQueue.set("ground", this.update.bind(this));
 
       if (this.gatherOrSilentPlate) {
         this.core.onRenderQueue.set(
@@ -344,46 +349,24 @@ export class Ground extends CustomSystem {
 
         if (intersects.length) {
           const intersectedMesh = intersects[0].object;
-
-          // 检查是否是建筑的主模型
-          if (intersectedMesh.userData.buildingName) {
-            this.postprocessing.clearOutlineAll(1);
-            const pickBuilding = this.buildingMeshObj[this.searchBuildingId];
-            // 获取所有属于同一建筑的网格
-            const buildingMeshes = this.buildingMeshArr.filter(
-              (mesh) =>
-                mesh.userData.buildingName ===
-                intersectedMesh.userData.buildingName
-            );
-
-            if (buildingMeshes.length > 0) {
-              this.postprocessing.addOutline(
-                [...buildingMeshes, pickBuilding],
-                1
-              );
-            }
-
-            // 检查是否可以进入室内，如果可以则显示提示框
-            const buildingName = intersectedMesh.userData.buildingName;
-            if (
-              this.buildingNames.some((name) => buildingName.includes(name)) &&
-              this.tooltip
-            ) {
-              // 计算提示框位置（在建筑上方）
-              const position = new THREE.Vector3();
-              intersectedMesh.getWorldPosition(position);
-              position.y += 10; // 在建筑上方显示
-              this.tooltip.show(position);
-            }
+          let current = intersectedMesh;
+          while (
+            current.parent &&
+            !this.buildingNames.some((name) => current.name.includes(name))
+          ) {
+            current = current.parent;
           }
+
+          // 计算显示位置（在建筑上方）
+          const position = new THREE.Vector3();
+          intersectedMesh.getWorldPosition(position);
+          position.y += 10; // 在建筑上方显示
+
+          // 使用封装的方法显示建筑悬停效果
+          this.showBuildingHoverEffect(current.name, position, current);
         } else {
-          this.postprocessing.clearOutlineAll(1);
-          if (this.searchBuildingId) {
-            let pickBuilding = this.buildingMeshObj[this.searchBuildingId];
-            this.postprocessing.addOutline(pickBuilding, 1);
-          }
-          // 隐藏提示框
-          this.tooltip && this.tooltip.hide();
+          // 使用封装的方法隐藏建筑悬停效果
+          this.hideBuildingHoverEffect();
         }
       }
     );
@@ -575,6 +558,22 @@ string} name
       // 设置地面网格
       this.groundMesh = model;
 
+      // 计算相机初始位置并立即设置，避免后续动画时的闪烁
+      const { radius, center } = getBoxCenter(model);
+      center.y += radius * 0.24;
+
+      const initialCameraPosition = new THREE.Vector3(
+        center.x,
+        center.y + radius * 0.8,
+        center.z + radius * 2.5 // 距离建筑更远一些
+      );
+      const controlsTarget = center.clone();
+
+      // 立即设置相机到初始位置
+      this.camera.position.copy(initialCameraPosition);
+      this.controls.target.copy(controlsTarget);
+      this.camera.lookAt(controlsTarget);
+
       // 更新天气范围
       // if (this.weather) {
       //   // 创建一个比地面模型稍大的包围盒，确保天气效果覆盖整个场景
@@ -585,6 +584,14 @@ string} name
       //   );
       //   this.weather.setBoundingBox(weatherBox);
       // }
+    }
+    if (name === "text") {
+      console.log(model, "model");
+      model.children.forEach((child) => {
+        this.buildingMeshArr.push(child);
+        // 应用高亮发光效果
+        this.applyGlowSignEffect(child);
+      });
     }
     // 检查是否是建筑模型
     if (name === "室内模型外壳") {
@@ -605,7 +612,7 @@ string} name
             child.userData.buildingName = name;
           }
         });
-        this.setBuildingBoard(childs);
+        // this.setBuildingBoard(childs);
       });
     }
     // 动画现在由全局动画管理器统一处理
@@ -626,6 +633,92 @@ string} name
         } else {
           this.adjustMaterial(child.material);
         }
+      }
+    });
+  }
+
+  /**
+   * 为模型应用高亮发光效果
+   * @param {THREE.Object3D} object 需要应用效果的对象
+   */
+  applyGlowSignEffect(object) {
+    object.traverse((child) => {
+      if (child.isMesh) {
+        // 获取原始材质颜色
+        let originalColor = new THREE.Color(0xffffff); // 默认白色
+        if (child.material) {
+          if (child.material.color) {
+            originalColor = child.material.color.clone();
+          } else if (child.material.emissive) {
+            originalColor = child.material.emissive.clone();
+          }
+        }
+
+        // 创建发光着色器材质
+        const glowMaterial = new THREE.ShaderMaterial({
+          transparent: true,
+          depthTest: false, // 关闭深度检测，避免被遮挡
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          uniforms: {
+            uColor: { value: originalColor }, // 使用原始材质颜色
+            uIntensity: { value: 1.8 }, // 发光强度
+            // 如果原材质有贴图，保留它
+            uTexture: {
+              value: child.material.map || null,
+            },
+            uHasTexture: {
+              value: child.material.map ? 1.0 : 0.0,
+            },
+          },
+          vertexShader: `
+             varying vec2 vUv;
+             
+             void main() {
+               vUv = uv;
+               gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+             }
+           `,
+          fragmentShader: `
+             uniform vec3 uColor;
+             uniform float uIntensity;
+             uniform sampler2D uTexture;
+             uniform float uHasTexture;
+             
+             varying vec2 vUv;
+             
+             void main() {
+               // 基础颜色
+               vec3 baseColor = uColor;
+               
+               // 如果有原始贴图，混合它
+               if (uHasTexture > 0.5) {
+                 vec3 textureColor = texture2D(uTexture, vUv).rgb;
+                 baseColor = textureColor * baseColor;
+               }
+               
+               // 高亮发光效果
+               vec3 finalColor = baseColor * uIntensity;
+               
+               // 输出颜色
+               gl_FragColor = vec4(finalColor, 1.0);
+             }
+           `,
+        });
+
+        // 替换原材质
+        child.material = glowMaterial;
+
+        // 设置渲染顺序，确保发光效果在最后渲染
+        child.renderOrder = 1000;
+
+        // 保存材质引用以便后续动画更新
+        if (!this.glowMaterials) {
+          this.glowMaterials = [];
+        }
+        this.glowMaterials.push(glowMaterial);
+
+        console.log(`已为 ${child.name || "未命名模型"} 应用高亮发光效果`);
       }
     });
   }
@@ -716,8 +809,13 @@ string} name
 
     // 根据建筑编号，找到对应的建筑名称，创建建筑标识牌
     const buildingName = name.split("_")[1];
+    const buildingTypeName = {
+      制冷: "能源站",
+      制热: "热水系统",
+      配电室: "配电室地下一层",
+    };
     const nameLabel = createBuildingNameLabel(
-      buildingName,
+      buildingTypeName[buildingName],
       // 单击：拉近视角
       (css2d) => {
         this.cameraMoveToBuildingTitle(name);
@@ -726,22 +824,18 @@ string} name
       (css2d) => {
         this.core.changeSystem("indoorSubsystem", name);
       },
-      // 鼠标进入：显示提示框
+      // 鼠标进入：显示建筑悬停效果
       (css2d) => {
-        if (
-          this.buildingNames.some((buildingName) =>
-            name.includes(buildingName)
-          ) &&
-          this.tooltip
-        ) {
-          const position = css2d.position.clone();
-          position.y += 5; // 在牌子稍微上方显示
-          this.tooltip.show(position);
-        }
+        const position = css2d.position.clone();
+        position.y += 5; // 在牌子稍微上方显示
+
+        // 使用封装的方法显示建筑悬停效果
+        this.showBuildingHoverEffect(name, position, group);
       },
-      // 鼠标离开：隐藏提示框
+      // 鼠标离开：隐藏建筑悬停效果
       (css2d) => {
-        this.tooltip && this.tooltip.hide();
+        // 使用封装的方法隐藏建筑悬停效果
+        this.hideBuildingHoverEffect();
       }
     );
     nameLabel.visible = true; // 默认显示
@@ -770,6 +864,65 @@ string} name
         res.visible = parseInt(res.element.innerText) > 0 ? visible : false;
       });
     });
+  }
+
+  /**
+   * 显示建筑悬停效果（提示框、环形圆圈、轮廓高亮）
+   * @param {string} buildingName - 建筑名称
+   * @param {THREE.Vector3} position - 显示位置
+   * @param {THREE.Object3D} [buildingObject] - 建筑对象，用于计算包围盒和轮廓高亮
+   */
+  showBuildingHoverEffect(buildingName, position, buildingObject = null) {
+    // 检查是否可以进入室内
+    if (this.buildingNames.some((name) => buildingName.includes(name))) {
+      // 显示提示框
+      if (this.tooltip) {
+        this.tooltip.show(position);
+      }
+
+      // 显示环形圆圈效果
+      if (this.buildingHoverRings && buildingObject) {
+        // 计算建筑的包围盒半径
+        const box = new THREE.Box3();
+        box.setFromObject(buildingObject);
+        const size = box.getSize(new THREE.Vector3());
+        const radius = Math.max(size.x, size.z) / 2;
+
+        this.buildingHoverRings.show(position, 1.6);
+      }
+
+      // 添加轮廓高亮
+      if (buildingObject && this.postprocessing) {
+        this.postprocessing.clearOutlineAll(1);
+        this.postprocessing.addOutline(buildingObject, 1);
+      }
+    }
+  }
+
+  /**
+   * 隐藏建筑悬停效果
+   */
+  hideBuildingHoverEffect() {
+    // 隐藏提示框
+    if (this.tooltip) {
+      this.tooltip.hide();
+    }
+
+    // 隐藏环形圆圈效果
+    if (this.buildingHoverRings) {
+      this.buildingHoverRings.hide();
+    }
+
+    // 如果有搜索的建筑，保持其轮廓高亮
+    if (this.searchBuildingId && this.postprocessing) {
+      const pickBuilding = this.buildingMeshObj[this.searchBuildingId];
+      if (pickBuilding) {
+        this.postprocessing.clearOutlineAll(1);
+        this.postprocessing.addOutline(pickBuilding, 1);
+      }
+    } else if (this.postprocessing) {
+      this.postprocessing.clearOutlineAll(1);
+    }
   }
 
   cameraMoveToBuildingTitle(id) {
@@ -821,6 +974,7 @@ string} name
     this.resetControls();
     this.setCameraState(false);
     this.core.onRenderQueue.delete(fenceSymbol);
+    this.core.onRenderQueue.delete("ground"); // 清理渲染队列
     this.measureArea.end();
     this.measureDistance.end();
     this.boxSelect.end();
@@ -836,6 +990,11 @@ string} name
     // 隐藏场景提示
     if (this.sceneHint) {
       this.sceneHint.hide();
+    }
+
+    // 隐藏环形圆圈效果
+    if (this.buildingHoverRings) {
+      this.buildingHoverRings.hide();
     }
 
     console.log("离开地面广场系统");
@@ -861,7 +1020,7 @@ string} name
     this.addEventListener();
     // ground场景正常流程镜头动画
     changeIndoor("home");
-    this.resetCamera(1500).then(() => {
+    this.resetCamera(1500, true).then(() => {
       if (this.core && this.core.crossSearch) {
         this.core.crossSearch.changeSceneSearch();
       }
@@ -953,7 +1112,7 @@ string} name
     });
     return group;
   }
-  resetCamera(duration = 1000) {
+  resetCamera(duration = 1000, fromOnLoaded = false) {
     if (!this.groundMesh) {
       console.warn("地面模型未加载，无法重置相机");
       return Promise.resolve();
@@ -961,24 +1120,24 @@ string} name
 
     const { radius, center } = getBoxCenter(this.groundMesh);
     center.y += radius * 0.24;
-    // const center = new THREE.Vector3(0, 0, 0);
-    const cameraPosition = new THREE.Vector3(
+
+    const finalCameraPosition = new THREE.Vector3(
       center.x,
-      center.y + 0.4,
-      center.z + radius * 1.2
+      center.y + 28.4,
+      center.z + radius * 1.8
     );
     const controlsTarget = center.clone();
 
     return new Promise((resolve, reject) => {
       if (
-        cameraPosition.distanceTo(this.camera.position) < 5 &&
+        finalCameraPosition.distanceTo(this.camera.position) < 5 &&
         controlsTarget.distanceTo(this.controls.target) < 5
       )
         resolve();
 
       this.tweenControl.changeTo({
         start: this.camera.position,
-        end: cameraPosition,
+        end: finalCameraPosition,
         duration,
         onComplete: () => {
           this.controls.enabled = true;
@@ -1054,6 +1213,17 @@ string} name
     });
   }
 
+  /**
+   * 子系统执行在动画帧中的函数
+   */
+  update() {
+    // 更新建筑悬停环形圆圈动画
+    if (this.buildingHoverRings && this.buildingHoverRings.visible) {
+      const deltaTime = this.core.clock ? this.core.clock.getDelta() : 0.016; // 备用时间增量
+      this.buildingHoverRings.update(deltaTime);
+    }
+  }
+
   destroy() {
     // 清理提示框资源
     if (this.tooltip) {
@@ -1065,6 +1235,27 @@ string} name
     if (this.sceneHint) {
       this.sceneHint.destroy();
       this.sceneHint = null;
+    }
+
+    // 清理环形圆圈资源
+    if (this.buildingHoverRings) {
+      this.buildingHoverRings.dispose();
+      this.scene.remove(this.buildingHoverRings);
+      this.buildingHoverRings = null;
+    }
+
+    // 清理发光材质资源
+    if (this.glowMaterials) {
+      this.glowMaterials.forEach((material) => {
+        if (material.uniforms) {
+          // 清理纹理资源
+          if (material.uniforms.uTexture && material.uniforms.uTexture.value) {
+            material.uniforms.uTexture.value.dispose();
+          }
+        }
+        material.dispose();
+      });
+      this.glowMaterials = [];
     }
   }
 
