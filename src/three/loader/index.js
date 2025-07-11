@@ -25,9 +25,7 @@ export const loader = new GLTFLoader(loadingManager);
 
 // 配置 DRACOLoader 以支持 Draco 压缩
 const dracoLoader = new DRACOLoader();
-dracoLoader.setDecoderPath(
-  "https://www.gstatic.com/draco/versioned/decoders/1.5.6/"
-);
+dracoLoader.setDecoderPath("./draco/");
 loader.setDRACOLoader(dracoLoader);
 
 // 全局动画管理器
