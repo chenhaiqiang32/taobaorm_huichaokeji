@@ -17,6 +17,7 @@ import { SceneHint } from "../../components/SceneHint";
 import { equipmentTreeManager } from "./equipmentTreeManager";
 
 let rightMouseupTime = 0;
+let rightClickTime = 0; // 添加全局的右键点击时间戳
 
 /**@type {OrbitControls} */
 const controlsParameters = {
@@ -51,13 +52,17 @@ export class IndoorSubsystem extends CustomSystem {
 
     // 保存用于射线检测的楼层引用，定位
     this.floors = [];
+    this.floorsName = [];
 
     // 设备标签数据存储（按楼层存储）
     this.deviceLabelsData = {};
 
     // 初始化场景提示
     this.sceneHint = new SceneHint();
-    console.log("this.sceneHint", this);
+
+    // 保存首次进入时的相机位置
+    this.initialCameraPosition = null;
+    this.initialControlsTarget = null;
   }
 
   async onEnter(buildingName) {
@@ -96,7 +101,7 @@ export class IndoorSubsystem extends CustomSystem {
       type: ".glb",
     };
     this.buildingName = buildingName;
-    return loadGLTF(
+    return await loadGLTF(
       [obj],
       this.onProgress.bind(this),
       this.onLoaded.bind(this)
@@ -201,22 +206,21 @@ export class IndoorSubsystem extends CustomSystem {
     }
   }
   onProgress(gltf, name) {
-    const building = gltf.scene;
-    let group = building.children.find((child) => child.name === "equip");
+    const group = gltf.scene;
     this.building = group;
-    const obj = { group, uTime: { value: 1.0 } };
-    group.traverse((child) => {
-      if (child.isMesh) {
-        this.modelProcessing(child, obj);
-        child.userData.parent = group.name;
-      }
+    group.children.forEach((child) => {
+      const obj = { group: child, uTime: { value: 1.0 } };
+      child.traverse((ichild) => {
+        if (ichild.isMesh) {
+          this.modelProcessing(ichild, obj);
+          ichild.userData.parent = group.name;
+        }
+      });
+      this.floors.push(child);
+      this.floorsName.push(child.name);
+      this.buildingObject[child.name] = obj;
     });
-
-    if (group.name.indexOf("BDW") === -1) {
-      this.floors.push(group);
-    }
-    this.buildingObject[group.name] = obj;
-    this.scene.add(building);
+    this.scene.add(this.building);
   }
   modelProcessing(child, obj) {
     // 设置阴影属性
@@ -286,19 +290,31 @@ export class IndoorSubsystem extends CustomSystem {
       this.core.onRenderQueue.set("indoorSubsystem", this.update.bind(this));
     }
 
+    console.log("=== 首次进入室内 - onLoaded ===");
+    console.log("当前相机位置:", this.camera.position);
+    console.log("当前controls.target:", this.controls.target);
+
+    // 保存首次进入时的相机位置
+    this.initialCameraPosition = this.camera.position.clone();
+    this.initialControlsTarget = this.controls.target.clone();
+    console.log("保存的初始相机位置:", this.initialCameraPosition);
+    console.log("保存的初始controls.target:", this.initialControlsTarget);
+
     this.cameraMove(this.building);
     this.addEventListener();
-    this.changeFloor("equip");
   }
-  cameraMove(group) {
+  cameraMove(group, startPosition = null) {
     return new Promise((res, rej) => {
       let position, target;
       const { center, radius } = getBoxCenter(group);
       target = center;
       position = new THREE.Vector3();
-      const _distance = this.camera.position.distanceTo(center);
-      const alpha = (_distance - Math.sqrt(radius) * 2) / _distance;
-      position.lerpVectors(this.camera.position, center, alpha);
+
+      // 使用指定的起始位置或当前相机位置
+      const startPos = startPosition || this.camera.position;
+      const _distance = startPos.distanceTo(center);
+      const alpha = ((_distance - Math.sqrt(radius) * 8) / _distance) * 0.75;
+      position.lerpVectors(startPos, center, alpha);
 
       this.tweenControl.changeTo({
         start: this.camera.position,
@@ -306,6 +322,15 @@ export class IndoorSubsystem extends CustomSystem {
         duration: 1000,
         onComplete: () => {
           this.controls.enable = true;
+          console.log("测试数据=== cameraMove 调试信息 ===");
+          console.log("测试数据传入的group:", group);
+          console.log("测试数据建筑中心:", center);
+          console.log("测试数据建筑半径:", radius);
+          console.log("测试数据起始位置:", startPos);
+          console.log("测试数据距离:", _distance);
+          console.log("测试数据alpha值:", alpha);
+          console.log("测试数据计算出的目标位置:", position);
+          console.log("测试数据目标target:", target);
           res();
         },
         onStart: () => {
@@ -390,8 +415,12 @@ export class IndoorSubsystem extends CustomSystem {
   addRayDbClick() {
     let event = this.core.raycast("dblclick", this.floors, (intersects) => {
       if (intersects.length) {
-        let target = intersects[0].object.userData.parent;
-        this.changeFloor(target);
+        let target = intersects[0].object;
+        while (!this.floors.includes(target)) {
+          target = target.parent;
+        }
+        console.log(target.name, "target");
+        this.changeFloor(target.name);
       }
     });
     this.eventClear.push(event.clear);
@@ -415,17 +444,21 @@ export class IndoorSubsystem extends CustomSystem {
     }
 
     if (!this.endChangeFloor) return false;
+
+    // 重置双击检测时间戳，确保新的楼层切换时双击检测是干净的
+    rightMouseupTime = 0;
+    rightClickTime = 0; // 重置全局右键点击时间戳
+
     this.resetData();
 
     // 清理当前楼层的设备标签
     this.clearDeviceLabels();
+
+    // 移除双击退出楼栋方法，避免与楼层内右键双击冲突
+    this.removeEventListener();
+
     if (!this.currentFloor) {
       this.endChangeFloor = false;
-      this.removeEventListener();
-      this.addPointerLister();
-      this.addIndoorEvent();
-      // !this.core.isFollowing() ? this.addRightDbClickReset() : null;
-      !this.core.isFollowing() ? this.addRightDbClickQuit() : null;
       this.switchFloorAnimate(floor).then((res) => {
         if (
           window.configs.floorToName[this.buildingName + "_室内"] &&
@@ -443,9 +476,8 @@ export class IndoorSubsystem extends CustomSystem {
         // 在楼层切换动画完成后加载设备标签数据
         this.loadAndRenderDeviceLabels();
 
-        // if (this.sceneHint) {
-        //   this.sceneHint.updateMessage("右键双击显示楼栋");
-        // }
+        // 确保在楼层切换完成后重新注册右键双击事件
+        this.setupFloorRaycastEvents(floor);
       });
       this.buildingAnimate(floor);
     }
@@ -456,10 +488,8 @@ export class IndoorSubsystem extends CustomSystem {
     )
       return;
 
-    // this.floorSwitchInner(floor);
-
-    // 拆分后的事件注册
-    this.setupFloorRaycastEvents(floor);
+    // 移除重复的事件注册，避免事件冲突
+    // this.setupFloorRaycastEvents(floor);
   }
   gatherOrSilentShader() {
     this.disPoseGatherShader();
@@ -515,32 +545,19 @@ export class IndoorSubsystem extends CustomSystem {
       return;
     }
   }
-  addPointerLister() {
-    let mousemovePointer = this.core.raycast(
-      "mousemove",
-      this.orientation.orientation3D.pointerArr,
-      (intersects) => {
-        if (intersects.length) {
-          document.body.style.cursor = "pointer";
-        } else {
-          document.body.style.cursor = "auto";
-        }
-      }
-    );
-    this.eventClear.push(mousemovePointer.clear);
-  }
   addRayMove() {
     let event = this.core.raycast("mousemove", this.floors, (intersects) => {
       if (intersects.length) {
-        let target = intersects[0].object.userData.parent;
+        let target = intersects[0].object;
+        while (!this.floors.includes(target)) {
+          target = target.parent;
+        }
+        console.log(target.name, "target");
         if (this.currentPoint === target) return;
         this.currentPoint = target;
         document.body.style.cursor = "pointer";
         this.core.postprocessing.clearOutlineAll(1);
-        this.core.postprocessing.addOutline(
-          this.buildingObject[target].group,
-          1
-        );
+        this.core.postprocessing.addOutline(target, 1);
       } else {
         if (!this.currentPoint) return;
         this.resetEffect();
@@ -549,16 +566,6 @@ export class IndoorSubsystem extends CustomSystem {
 
     this.eventClear.push(event.clear);
     return event.clear;
-  }
-  addRightDbClickReset() {
-    const del = this.rightDblClickListener(() => {
-      this.removeEventListener();
-      this.cameraMove(this.building);
-      this.addEventListener();
-      this.resetBuilding();
-      this.disPoseGatherShader();
-    });
-    this.eventClear.push(del);
   }
   setFloorGatherOrSilent(param) {
     this.gatherOrSilentData[param.areaDataFloor] = param;
@@ -570,16 +577,40 @@ export class IndoorSubsystem extends CustomSystem {
     this.eventClear.push(del);
   }
   rightDblClickListener(fn) {
-    const rightDblClick = this.core.addEventListener("mouseup");
-    const del = rightDblClick.add((e) => {
-      if (e.button !== 2) return;
-      let timeStamp = new Date().getTime();
-      if (timeStamp - rightMouseupTime < 250) {
+    // 改为document事件监听
+    const handleMouseUp = (e) => {
+      console.log("右键点击，时间戳测试一下", e.button);
+      if (e.button !== 2) return; // 只处理右键
+
+      const timeStamp = new Date().getTime();
+      console.log(
+        `右键点击，时间戳: ${timeStamp}, 上次时间戳: ${rightMouseupTime}`
+      );
+
+      if (rightMouseupTime === 0) {
+        // 第一次右键点击，记录时间戳
+        rightMouseupTime = timeStamp;
+        console.log("第一次右键点击，记录时间戳");
+      } else if (timeStamp - rightMouseupTime < 300) {
+        // 双击检测成功
+        console.log("检测到右键双击，执行恢复楼栋功能");
         fn(e);
-        timeStamp = 0;
+        rightMouseupTime = 0; // 重置时间戳，避免连续触发
+      } else {
+        // 双击检测失败，更新为新的时间戳
+        rightMouseupTime = timeStamp;
+        console.log("双击检测失败，更新为新的时间戳");
       }
-      rightMouseupTime = timeStamp;
-    });
+    };
+
+    // 添加document事件监听
+    document.addEventListener("mouseup", handleMouseUp);
+
+    // 返回清理函数
+    const del = () => {
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+
     return del;
   }
   switchFloorAnimate(target) {
@@ -1052,6 +1083,7 @@ export class IndoorSubsystem extends CustomSystem {
 
     this.buildingObject = {};
     this.floors = [];
+    this.floorsName = [];
     this.currentFloor = null;
     this.endChangeFloor = true;
 
@@ -1273,6 +1305,9 @@ export class IndoorSubsystem extends CustomSystem {
   // 新增：清理楼层射线检测事件
   clearFloorRaycastEvents() {
     if (this._indoorRaycastClearFns) {
+      console.log(
+        `清理楼层射线检测事件，共 ${this._indoorRaycastClearFns.length} 个事件`
+      );
       this._indoorRaycastClearFns.forEach((fn) => fn());
       this._indoorRaycastClearFns = [];
     }
@@ -1280,9 +1315,18 @@ export class IndoorSubsystem extends CustomSystem {
 
   // 新增：注册楼层children射线检测与outline事件
   setupFloorRaycastEvents(floor) {
+    console.log(`开始设置楼层 ${floor} 的射线检测事件`);
     this.clearFloorRaycastEvents();
     const children = this.buildingObject[floor].group.children;
     this._indoorRaycastClearFns = [];
+
+    if (!children || children.length === 0) {
+      console.warn(`楼层 ${floor} 没有子对象，无法设置射线检测事件`);
+      return;
+    }
+
+    console.log(`楼层 ${floor} 有 ${children.length} 个子对象`);
+
     // 初始化时保存原始材质
     children.forEach((obj) => {
       obj.typeName = "device";
@@ -1352,9 +1396,17 @@ export class IndoorSubsystem extends CustomSystem {
     });
     this._indoorRaycastClearFns.push(clickEvt.clear);
 
-    // 右键双击恢复
+    // 右键双击恢复 - 调用楼栋级别的恢复功能
+    console.log(`为楼层 ${floor} 注册右键双击恢复事件`);
+
+    // 使用公用的rightDblClickListener方法
     const rightEvt = this.rightDblClickListener(() => {
-      // 只清除轮廓，不清除事件监听器
+      console.log(`楼层 ${floor} 的右键双击恢复事件被触发`);
+      console.log("=== 右键双击恢复 - 开始 ===");
+      console.log("当前相机位置:", this.camera.position);
+      console.log("当前controls.target:", this.controls.target);
+
+      // 先清除设备级别的效果
       this.core.postprocessing.clearOutlineAll(1);
       this.core.postprocessing.clearOutlineAll(2);
       // 恢复全部显示和原始材质
@@ -1373,15 +1425,23 @@ export class IndoorSubsystem extends CustomSystem {
           }
         });
       });
-      // 视角复位到切换楼层时的位置
-      this.cameraMoveToFloor(this.buildingObject[floor].group).then(() => {
-        // 设备恢复后，重新注册退出事件
-        if (!this.core.isFollowing()) {
-          this.addRightDbClickQuit();
-        }
-      });
+
+      // 然后执行楼栋级别的恢复（重置到楼栋视角，显示所有楼层）
+      this.removeEventListener();
+
+      // 使用保存的初始相机位置来确保与首次进入时的视角一致
+      this.cameraMove(this.building, this.initialCameraPosition);
+      this.addEventListener();
+      this.resetBuilding();
+      this.disPoseGatherShader();
+
+      // 重新绑定双击退出楼栋方法
+      this.addRightDbClickQuit();
     });
     this._indoorRaycastClearFns.push(rightEvt);
+    console.log(
+      `楼层 ${floor} 的射线检测事件设置完成，共 ${this._indoorRaycastClearFns.length} 个事件`
+    );
   }
 
   /**

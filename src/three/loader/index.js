@@ -6,6 +6,7 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader";
 import { GbkOBJLoader } from "../../lib/GbkOBJLoader";
 import { loadingInstance } from "./loading";
 import { postOnLoaded, postOnLoading } from "../../message/postMessage";
+import { MeshoptDecoder } from "meshoptimizer";
 
 const loadingManager = new LoadingManager(
   function onLoaded() {
@@ -27,6 +28,22 @@ export const loader = new GLTFLoader(loadingManager);
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath("./draco/");
 loader.setDRACOLoader(dracoLoader);
+
+// 配置 MeshoptDecoder 以支持 meshopt 压缩
+async function setupMeshoptDecoder() {
+  try {
+    console.log("🔄 正在初始化 MeshoptDecoder...");
+    // 等待 MeshoptDecoder 初始化完成
+    await MeshoptDecoder.ready;
+    loader.setMeshoptDecoder(MeshoptDecoder);
+    console.log("✅ MeshoptDecoder 已成功配置");
+  } catch (error) {
+    console.warn("⚠️ MeshoptDecoder 配置失败:", error);
+  }
+}
+
+// 立即设置 MeshoptDecoder
+setupMeshoptDecoder();
 
 // 全局动画管理器
 class GlobalAnimationManager {
@@ -176,7 +193,14 @@ function handleMaterialFlowAnimation(model) {
  * @param {()=>void} onLoaded
  * @returns {Promise}
  */
-export function loadGLTF(models, onProgress, onLoaded) {
+export async function loadGLTF(models, onProgress, onLoaded) {
+  // 确保 MeshoptDecoder 已初始化
+  try {
+    await MeshoptDecoder.ready;
+  } catch (error) {
+    console.warn("⚠️ MeshoptDecoder 初始化失败，但继续加载模型:", error);
+  }
+
   const promises = [];
   loadingInstance.service(0);
   postOnLoading();

@@ -20,7 +20,6 @@ export class EquipmentTreeManager {
    */
   async getEquipmentTree(buildingName) {
     console.log(`🔍 请求获取建筑 ${buildingName} 的设备树数据`);
-
     // 如果已经加载过，直接返回
     if (this.loadedBuildings.has(buildingName)) {
       console.log(`✅ 建筑 ${buildingName} 的设备树数据已缓存，直接返回`);
@@ -68,14 +67,14 @@ export class EquipmentTreeManager {
       return {};
     }
 
-    return new Promise((resolve, reject) => {
+    try {
       const modelConfig = {
         name: buildingName,
         path: `./models/inDoor/${modelFileName}`,
         type: ".glb",
       };
 
-      loadGLTF(
+      await loadGLTF(
         [modelConfig],
         (gltf, name) => {
           // 查找 name 为 "equip" 的子对象
@@ -109,15 +108,14 @@ export class EquipmentTreeManager {
           const buildingTree = {};
           buildingTree[buildingName] = this.equipmentTree[buildingName] || [];
           web3dModelsGroup(buildingTree);
-
-          resolve(this.equipmentTree[buildingName] || {});
-        },
-        (error) => {
-          console.error(`加载建筑 ${buildingName} 设备树数据失败:`, error);
-          reject(error);
         }
       );
-    });
+
+      return this.equipmentTree[buildingName] || {};
+    } catch (error) {
+      console.error(`加载建筑 ${buildingName} 设备树数据失败:`, error);
+      throw error;
+    }
   }
 
   /**

@@ -278,14 +278,14 @@ export class Ground extends CustomSystem {
           let current = intersectedMesh;
           while (
             current.parent &&
-            !this.buildingNames.some((name) => current.name.includes(name))
+            !this.buildingNames.some((name) => current.name === name)
           ) {
             current = current.parent;
           }
 
           if (
             !this.boxSelectStatus &&
-            this.buildingNames.some((name) => current.name.includes(name))
+            this.buildingNames.some((name) => current.name === name)
           ) {
             dblclickBuilding(current.name.split("_")[0]); // 通知前端我们即将进入室内，前端借此关闭一些弹窗
             this.core.changeSystem("indoorSubsystem", current.name);
@@ -352,11 +352,10 @@ export class Ground extends CustomSystem {
           let current = intersectedMesh;
           while (
             current.parent &&
-            !this.buildingNames.some((name) => current.name.includes(name))
+            !this.buildingNames.some((name) => current.name === name)
           ) {
             current = current.parent;
           }
-
           // 计算显示位置（在建筑上方）
           const position = new THREE.Vector3();
           intersectedMesh.getWorldPosition(position);

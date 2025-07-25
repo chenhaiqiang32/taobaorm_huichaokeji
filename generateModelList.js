@@ -41,8 +41,10 @@ try {
   );
   const indoorModelFiles = indoorFiles.filter((file) => file.endsWith(".glb"));
 
-  // 提取室内模型名称（_前面的部分）
-  const buildingNames = indoorModelFiles.map((file) => file.split("_")[0]);
+  // 提取室内模型名称（去除 .glb 后缀）
+  const buildingNames = indoorModelFiles.map((file) =>
+    file.replace(/\.glb$/i, "")
+  );
 
   if (outdoorModelFiles.length === 0) {
     console.warn("警告: 没有找到室外 .glb 文件");
