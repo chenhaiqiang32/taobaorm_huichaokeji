@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import * as TWEEN from "three/examples/jsm/libs/tween.module";
 import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { CustomSystem } from "../customSystem";
 import { loadGLTF } from "@/three/loader";
 import { getBoxCenter } from "../../../lib/box3Fun";
@@ -84,7 +85,8 @@ export class IndoorSubsystem extends CustomSystem {
 
     this.sceneHint.show("右键双击返回室外");
 
-    this.setIndoorHDRSky();
+    // 设置室内环境效果（默认使用 HDR）
+    this.setIndoorEnvironment("hdr");
 
     // 按需加载设备树数据
     try {
@@ -307,14 +309,15 @@ export class IndoorSubsystem extends CustomSystem {
     return new Promise((res, rej) => {
       let position, target;
       const { center, radius } = getBoxCenter(group);
-      target = center;
-      position = new THREE.Vector3();
+      target = center.clone();
 
-      // 使用指定的起始位置或当前相机位置
-      const startPos = startPosition || this.camera.position;
-      const _distance = startPos.distanceTo(center);
-      const alpha = ((_distance - Math.sqrt(radius) * 8) / _distance) * 0.75;
-      position.lerpVectors(startPos, center, alpha);
+      // 直接使用center和radius计算位置，不依赖_distance
+      const cameraDistance = radius * 2; // 相机距离为半径的2倍
+      position = new THREE.Vector3(
+        center.x,
+        center.y + cameraDistance * 0.8,
+        center.z + cameraDistance * 1.2
+      );
 
       this.tweenControl.changeTo({
         start: this.camera.position,
@@ -326,9 +329,7 @@ export class IndoorSubsystem extends CustomSystem {
           console.log("测试数据传入的group:", group);
           console.log("测试数据建筑中心:", center);
           console.log("测试数据建筑半径:", radius);
-          console.log("测试数据起始位置:", startPos);
-          console.log("测试数据距离:", _distance);
-          console.log("测试数据alpha值:", alpha);
+          console.log("测试数据相机距离:", cameraDistance);
           console.log("测试数据计算出的目标位置:", position);
           console.log("测试数据目标target:", target);
           res();
@@ -356,11 +357,11 @@ export class IndoorSubsystem extends CustomSystem {
       const floorHeight = max.y - min.y;
       const target = center.clone();
 
-      const cameraDistance = Math.max(floorHeight * 1.5, radius * 2);
+      const cameraDistance = Math.max(floorHeight * 1.5, radius * 1);
       const position = new THREE.Vector3(
         center.x,
-        center.y + floorHeight + cameraDistance * 0.8,
-        center.z + cameraDistance * 1.2
+        center.y + floorHeight + cameraDistance * 1.2,
+        center.z + cameraDistance * 0.8
       );
 
       this.tweenControl.changeTo({
@@ -478,6 +479,7 @@ export class IndoorSubsystem extends CustomSystem {
 
         // 确保在楼层切换完成后重新注册右键双击事件
         this.setupFloorRaycastEvents(floor);
+        this.sceneHint.updateMessage("右键双击恢复楼栋");
       });
       this.buildingAnimate(floor);
     }
@@ -839,6 +841,43 @@ export class IndoorSubsystem extends CustomSystem {
       this.shadowCameraHelper.dispose();
       this.shadowCameraHelper = null;
     }
+  }
+
+  /**
+   * 设置室内环境效果
+   * @param {string} type - 环境类型: 'room', 'hdr', 'default'
+   */
+  setIndoorEnvironment(type = "hdr") {
+    // 先清理现有环境
+    this.clearIndoorHDR();
+
+    switch (type) {
+      case "room":
+        // 使用 RoomEnvironment
+        const roomEnvironment = new RoomEnvironment(this.renderer);
+        this.scene.environment = roomEnvironment.environment;
+        this.scene.background = roomEnvironment.environment;
+        console.log("室内已设置 RoomEnvironment");
+        break;
+
+      case "hdr":
+        // 使用 HDR 环境贴图
+        this.setIndoorHDRSky();
+        break;
+
+      case "default":
+        // 使用默认环境
+        this.scene.background = SunnyTexture;
+        console.log("室内已设置默认环境");
+        break;
+
+      default:
+        console.warn(`未知的室内环境类型: ${type}`);
+        break;
+    }
+
+    // 更新所有材质的环境贴图
+    this.processIndoorEnvMapMaterials();
   }
 
   /**

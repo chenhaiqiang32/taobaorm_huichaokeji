@@ -13,6 +13,7 @@ import {
 } from "../../../message/postMessage";
 import { loadTexture } from "../../../utils/texture";
 import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { SunnyTexture, Weather } from "../../components/weather";
 
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls";
@@ -75,9 +76,10 @@ export class Ground extends CustomSystem {
     super(core);
 
     this.tweenControl = core.tweenControl;
-    this.scene.background = SunnyTexture;
+    // 移除原来的背景设置，使用 RoomEnvironment 设置
+    // this.scene.background = SunnyTexture;
     // 设置环境贴图，确保在模型加载前可用
-    this.setHDRSky();
+    // this.setHDRSky();
     this.onRenderQueue = core.onRenderQueue;
     this.controls = core.controls;
     this.baseCamera = core.baseCamera;
@@ -541,7 +543,6 @@ string} name
     const model = gltf.scene;
 
     // 处理模型材质
-    this.adjustModelMaterials(model);
 
     if (name === "内地形") {
       const { min, max } = getBoxCenter(model);
@@ -602,7 +603,7 @@ string} name
             // 设置网格属性
             child.castShadow = true;
             child.receiveShadow = true;
-
+            this.adjustModelMaterials(child);
             // 将网格添加到射线检测数组
             this.buildingMeshArr.push(child);
             this.buildingMeshObj[child.name] = child;
@@ -623,17 +624,12 @@ string} name
    * 调整模型材质属性
    * @param {THREE.Object3D} model 模型对象
    */
-  adjustModelMaterials(model) {
-    model.traverse((child) => {
-      if (child.isMesh && child.material) {
-        // 处理单个材质
-        if (Array.isArray(child.material)) {
-          child.material.forEach((material) => this.adjustMaterial(material));
-        } else {
-          this.adjustMaterial(child.material);
-        }
-      }
-    });
+  adjustModelMaterials(child) {
+    if (!child.material.name === "bl") return;
+    const newMaterial = this.adjustMaterial(child.material);
+    if (newMaterial) {
+      child.material = newMaterial;
+    }
   }
 
   /**
@@ -721,13 +717,64 @@ string} name
       }
     });
   }
+  generateTexture() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 2;
+    canvas.height = 2;
 
+    const context = canvas.getContext("2d");
+    context.fillStyle = "white";
+    context.fillRect(0, 1, 2, 1);
+
+    return canvas;
+  }
   /**
    * 调整单个材质属性
    * @param {THREE.Material} material 材质对象
    */
   adjustMaterial(material) {
     if (!material) return;
+    const texture = new THREE.CanvasTexture(this.generateTexture());
+    const hdrEquirect = new RGBELoader()
+      .setPath("./")
+      .load("royal_esplanade_1k.hdr", function () {
+        hdrEquirect.mapping = THREE.EquirectangularReflectionMapping;
+      });
+    texture.magFilter = THREE.NearestFilter;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.repeat.set(1, 3.5);
+    // 为材质名称为 "bl" 的材质应用物理材质
+    if (material.name === "bl") {
+      // 创建物理材质，类似 README.md 中的示例
+      const physicalMaterial = new THREE.MeshPhysicalMaterial({
+        color: 0xffffff,
+        metalness: 0.8,
+        roughness: 0.0,
+        ior: 4.0,
+        alphaMap: texture,
+        envMap: hdrEquirect,
+        transmission: 0.4,
+        thickness: 1.0,
+        specularIntensity: 12.0,
+        specularColor: 0xffffff,
+        envMapIntensity: 2.0,
+        opacity: 0.8,
+        side: THREE.DoubleSide,
+        transparent: true,
+        depthTest: true,
+        depthWrite: false,
+      });
+
+      // 设置环境贴图（如果场景环境贴图存在）
+      // if (this.scene.environment) {
+      //   physicalMaterial.envMap = this.scene.environment;
+      //   physicalMaterial.envMapIntensity = 12.0;
+      // }
+
+      // 替换原材质
+      return physicalMaterial;
+    }
 
     // 如果 roughness 为 0，设置为 0.2
     if (material.roughness !== undefined && material.roughness === 0) {
@@ -740,27 +787,16 @@ string} name
     // 如果 metalness 为 1，设置为 0.68 并添加环境贴图
     if (material.metalness !== undefined && material.metalness === 1) {
       material.metalness = 0.68;
+    }
 
-      // 为金属材质设置环境贴图;
-      // if (this.scene.environment) {
-      //   material.envMap = this.scene.environment;
-      //   material.envMapIntensity = 0.5; // 环境贴图强度
-      //   material.needsUpdate = true; // 确保材质更新
-      //   console.log(
-      //     `调整材质 ${
-      //       material.name || "unnamed"
-      //     } 的 metalness: 1 -> 0.68，并设置环境贴图`
-      //   );
-      // } else {
-      //   // 如果环境贴图还没准备好，标记这个材质稍后处理
-      //   this.pendingEnvMapMaterials = this.pendingEnvMapMaterials || [];
-      //   this.pendingEnvMapMaterials.push(material);
-      //   console.log(
-      //     `调整材质 ${
-      //       material.name || "unnamed"
-      //     } 的 metalness: 1 -> 0.68，环境贴图稍后设置`
-      //   );
-      // }
+    // 为所有材质设置环境贴图（如果场景环境贴图存在）
+    if (this.scene.environment) {
+      material.envMap = this.scene.environment;
+      material.envMapIntensity = 0.8; // 环境贴图强度
+      material.needsUpdate = true; // 确保材质更新
+      console.log(
+        `为材质 ${material.name || "unnamed"} 设置环境贴图，强度: 0.8`
+      );
     }
   }
 
@@ -996,6 +1032,9 @@ string} name
       this.buildingHoverRings.hide();
     }
 
+    // 清理环境贴图资源
+    this.clearEnvironment();
+
     console.log("离开地面广场系统");
   }
   onLoaded() {
@@ -1158,6 +1197,9 @@ string} name
     });
   }
   initLight() {
+    // 设置 RoomEnvironment 环境效果
+    this.setEnvironment("room");
+
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.45); // 线性SRG
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1.55);
     directionalLight.shadow.camera.near = 1;
@@ -1203,7 +1245,7 @@ string} name
     dir3.position.set(150, 100, 0);
     // this._add(dir3);
 
-    console.log("地面系统灯光初始化完成");
+    console.log("地面系统灯光初始化完成，已设置 RoomEnvironment");
   }
   showAllBuildingLabel() {
     Object.values(this.buildingNameLabelMap).forEach((child) => {
@@ -1220,6 +1262,17 @@ string} name
     if (this.buildingHoverRings && this.buildingHoverRings.visible) {
       const deltaTime = this.core.clock ? this.core.clock.getDelta() : 0.016; // 备用时间增量
       this.buildingHoverRings.update(deltaTime);
+    }
+
+    // 更新着色器材质的时间uniform
+    if (this.glowMaterials) {
+      this.glowMaterials.forEach((material) => {
+        if (material.uniforms && material.uniforms.iTime) {
+          material.uniforms.iTime.value = this.core.clock
+            ? this.core.clock.getElapsedTime()
+            : 0;
+        }
+      });
     }
   }
 
@@ -1255,6 +1308,98 @@ string} name
         material.dispose();
       });
       this.glowMaterials = [];
+    }
+
+    // 清理环境贴图资源
+    this.clearEnvironment();
+  }
+
+  /**
+   * 清理环境贴图资源
+   */
+  clearEnvironment() {
+    if (this.scene.environment) {
+      this.scene.environment.dispose();
+      this.scene.environment = null;
+    }
+    if (this.scene.background && this.scene.background !== SunnyTexture) {
+      this.scene.background.dispose();
+      this.scene.background = null;
+    }
+  }
+
+  /**
+   * 设置环境效果
+   * @param {string} type - 环境类型: 'room', 'hdr', 'default'
+   * @param {Object} options - 配置选项
+   */
+  setEnvironment(type = "room", options = {}) {
+    // 先清理现有环境
+    this.clearEnvironment();
+
+    switch (type) {
+      case "room":
+        // 使用 RoomEnvironment
+        const pmremGenerator = new THREE.PMREMGenerator(this.core.renderer);
+        this.scene.environment = pmremGenerator.fromScene(
+          new RoomEnvironment(),
+          0.24
+        ).texture;
+        this.scene.background = SunnyTexture;
+        console.log("已设置 RoomEnvironment");
+        break;
+
+      case "hdr":
+        // 使用 HDR 环境贴图
+        this.setHDRSky();
+        break;
+
+      case "default":
+        // 使用默认环境
+        this.scene.background = SunnyTexture;
+        console.log("已设置默认环境");
+        break;
+
+      default:
+        console.warn(`未知的环境类型: ${type}`);
+        break;
+    }
+
+    // 更新所有材质的环境贴图
+    this.updateAllMaterialsEnvironment();
+  }
+
+  /**
+   * 更新所有材质的环境贴图
+   */
+  updateAllMaterialsEnvironment() {
+    this.scene.traverse((object) => {
+      if (object.isMesh && object.material) {
+        if (Array.isArray(object.material)) {
+          object.material.forEach((material) => {
+            this.setupMaterialEnvironment(material);
+          });
+        } else {
+          this.setupMaterialEnvironment(object.material);
+        }
+      }
+    });
+  }
+
+  /**
+   * 设置单个材质的环境贴图
+   * @param {THREE.Material} material
+   */
+  setupMaterialEnvironment(material) {
+    if (
+      material &&
+      (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial)
+    ) {
+      if (this.scene.environment) {
+        material.envMap = this.scene.environment;
+        material.envMapIntensity = 0.8;
+        material.needsUpdate = true;
+      }
     }
   }
 
