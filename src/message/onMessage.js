@@ -151,12 +151,7 @@ export const onMessage = async () => {
             if (currentParam === "地面") {
               core.changeSystem("ground");
             } else {
-              const nameToType = {
-                制冷: "AFS9512042_制冷",
-                制热: "AFS9512043_制热",
-                配电: "AFS9512044_配电室",
-              };
-              core.changeSystem("indoorSubsystem", nameToType[currentParam]);
+              core.changeSystem("indoorSubsystem", currentParam);
             }
 
             // 切换完成后重置标记
@@ -539,6 +534,28 @@ export const onMessage = async () => {
                 : 0
             );
             console.log("==================");
+          }
+          break;
+        }
+        case "handleDeviceClick": {
+          // 处理设备点击事件
+          const deviceCode = event.data.param;
+          if (!deviceCode) {
+            console.warn("设备点击指令缺少设备名称参数");
+            return;
+          }
+
+          console.log(`收到设备点击指令，设备名称: ${deviceCode}`);
+
+          if (core.indoorSubsystem) {
+            // 调用室内子系统的设备点击处理方法
+            core.indoorSubsystem
+              .handleDeviceClick(deviceCode)
+              .catch((error) => {
+                console.error("处理设备点击时发生错误:", error);
+              });
+          } else {
+            console.warn("室内子系统未初始化，无法处理设备点击");
           }
           break;
         }

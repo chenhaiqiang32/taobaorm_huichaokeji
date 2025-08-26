@@ -15,20 +15,12 @@ window.configs = {
   },
 };
 window.floorToName = {
-  中心数据机房: {
-    path: "inDoor/1楼_室内",
-    floor: "4c",
+  一楼: {
+    path: "inDoor/A01B001",
+    floor: "F01",
   },
-  无线发射机房: {
-    path: "inDoor/2楼_室内",
-    floor: "2-1c",
-  },
-  UPS机房: {
-    path: "inDoor/2楼_室内",
-    floor: "1-1c",
-  },
-  柴油发电机房: {
-    path: "inDoor/柴油发电机房_室内",
-    floor: "1c",
+  二楼: {
+    path: "inDoor/A01B001",
+    floor: "F02",
   },
 };

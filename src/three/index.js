@@ -169,16 +169,28 @@ export class Store3D extends CoreExtensions {
     // 检查当前是否已经在室内系统
     const isCurrentlyIndoor = this.currentSystem === this.indoorSubsystem;
 
-    // 如果当前已经在室内系统，需要先执行清理操作
+    // 如果当前已经在室内系统，检查是否是同一个楼栋
     if (isCurrentlyIndoor) {
-      console.log("当前已在室内系统，执行清理操作");
-      // 使用公共清理方法
-      this.indoorSubsystem.clearIndoorData();
+      // 检查当前楼栋名称是否与目标楼栋相同
+      const isSameBuilding = this.indoorSubsystem.buildingName === buildingName;
 
-      // 重置相机位置到默认状态，避免位置冲突
-      this.camera.position.set(0, 10, 20);
-      this.controls.target.set(0, 0, 0);
-      this.controls.update();
+      if (isSameBuilding) {
+        console.log(
+          `当前已在室内系统且是同一个楼栋 "${buildingName}"，直接切换到楼层 ${floor}`
+        );
+        // 直接切换到指定楼层，无需重新加载楼栋
+        this.changeFloor(floor);
+        return;
+      } else {
+        console.log("当前已在室内系统但楼栋不同，执行清理操作");
+        // 使用公共清理方法
+        this.indoorSubsystem.clearIndoorData();
+
+        // 重置相机位置到默认状态，避免位置冲突
+        this.camera.position.set(0, 10, 20);
+        this.controls.target.set(0, 0, 0);
+        this.controls.update();
+      }
     }
 
     // 切换到室内系统

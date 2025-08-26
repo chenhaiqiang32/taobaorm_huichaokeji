@@ -37,6 +37,7 @@ import { modelFiles, buildingNames } from "../../../assets/modelList";
 import { Tooltip } from "../../components/Tooltip";
 import { SceneHint } from "../../components/SceneHint";
 import { BuildingHoverRings } from "../../../lib/BuildingHoverRings";
+import { glassEffect } from "../../../shader";
 
 // 获取模型文件列表
 async function getModelFiles() {
@@ -85,7 +86,7 @@ export class Ground extends CustomSystem {
     this.baseCamera = core.baseCamera;
     this.camera = core.camera;
     this.orientation = core.orientation;
-
+    this.buildingModel = null;
     this.boxSelect = core.orientation.boxSelect;
     this.postprocessing = core.postprocessing;
 
@@ -102,6 +103,7 @@ export class Ground extends CustomSystem {
     this._add(this.labelGroup);
 
     this.groundMesh = null;
+    this.cameraResetModel = null;
     this.fencePlate = null;
     this.gatherOrSilentPlate = null;
     this.eventClear = [];
@@ -335,7 +337,21 @@ export class Ground extends CustomSystem {
     if (buildingInserts.length) {
       const intersectedMesh = buildingInserts[0].object;
       if (intersectedMesh.userData.buildingName) {
-        this.commonSearchBuilding(intersectedMesh.userData.buildingName);
+        const buildingName = intersectedMesh.userData.buildingName;
+        console.log("groundClickEvent: 点击建筑", buildingName);
+        console.log(
+          "buildingNameLabelMap keys:",
+          Object.keys(this.buildingNameLabelMap)
+        );
+
+        // 检查建筑名称是否存在于标签映射中
+        if (this.buildingNameLabelMap[buildingName]) {
+          this.commonSearchBuilding(buildingName);
+        } else {
+          console.warn(
+            `groundClickEvent: 建筑名称 "${buildingName}" 在 buildingNameLabelMap 中不存在`
+          );
+        }
       }
     }
   }
@@ -513,17 +529,38 @@ export class Ground extends CustomSystem {
   }
 
   searchBuilding(visible = true) {
+    console.log("searchBuilding: 开始搜索建筑", this.searchBuildingId);
+    console.log(
+      "buildingNameLabelMap keys:",
+      Object.keys(this.buildingNameLabelMap)
+    );
+
     if (visible) {
       // 未建模的建筑不用通知显示前端牌子
       // 通知前端显示建筑弹窗
       getBuildingDetail(this.searchBuildingId);
     }
+
     let title = this.buildingNameLabelMap[this.searchBuildingId];
-    this.boardClick(title); // 视角拉近建筑
+    if (title) {
+      console.log("searchBuilding: 找到标签对象，调用boardClick");
+      this.boardClick(title); // 视角拉近建筑
+    } else {
+      console.warn(
+        `searchBuilding: 未找到建筑ID为 ${this.searchBuildingId} 的标签对象`
+      );
+      console.warn("可用的建筑ID:", Object.keys(this.buildingNameLabelMap));
+    }
 
     this.postprocessing.clearOutlineAll(1);
     let pickBuilding = this.buildingMeshObj[this.searchBuildingId];
-    this.postprocessing.addOutline(pickBuilding, 1);
+    if (pickBuilding) {
+      this.postprocessing.addOutline(pickBuilding, 1);
+    } else {
+      console.warn(
+        `searchBuilding: 未找到建筑ID为 ${this.searchBuildingId} 的建筑对象`
+      );
+    }
   }
   createFence(data) {
     this.fencePlate.create(data);
@@ -603,6 +640,7 @@ string} name
             // 设置网格属性
             child.castShadow = true;
             child.receiveShadow = true;
+            // 调整材质属性（包括为 "bbll" 材质添加玻璃效果）
             this.adjustModelMaterials(child);
             // 将网格添加到射线检测数组
             this.buildingMeshArr.push(child);
@@ -614,6 +652,11 @@ string} name
         });
         // this.setBuildingBoard(childs);
       });
+      this.cameraResetModel = model;
+      this.buildingModel = model;
+
+      // 为建筑模型添加探照灯光和点光源，模拟玻璃光照效果
+      this.addBuildingLighting(model);
     }
     // 动画现在由全局动画管理器统一处理
 
@@ -625,10 +668,9 @@ string} name
    * @param {THREE.Object3D} model 模型对象
    */
   adjustModelMaterials(child) {
-    if (!child.material.name === "bl") return;
-    const newMaterial = this.adjustMaterial(child.material);
-    if (newMaterial) {
-      child.material = newMaterial;
+    // 处理材质名称为 "bbll" 的材质，添加玻璃效果
+    if (child.material.name === "bbll") {
+      this.addGlassProperties(child.material);
     }
   }
 
@@ -798,6 +840,208 @@ string} name
         `为材质 ${material.name || "unnamed"} 设置环境贴图，强度: 0.8`
       );
     }
+  }
+
+  /**
+   * 为原始材质添加玻璃属性，实现反光玻璃效果
+   * @param {THREE.Material} material 原始材质
+   */
+  addGlassProperties(material) {
+    // 加载 sIBL-LA_Downtown_Afternoon_Fishing_3k.hdr 环境贴图
+    const rgbeLoader = new RGBELoader();
+    rgbeLoader.setDataType(THREE.FloatType);
+
+    rgbeLoader.load(
+      "./sIBL-LA_Downtown_Afternoon_Fishing_3k.hdr",
+      (texture) => {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        texture.colorSpace = THREE.SRGBColorSpace;
+
+        // 为材质设置环境贴图
+        material.envMap = texture;
+        material.envMapIntensity = 3.2; // 环境贴图强度
+        material.needsUpdate = true;
+
+        console.log(
+          "已为材质添加 sIBL-LA_Downtown_Afternoon_Fishing_3k.hdr 环境贴图"
+        );
+      },
+      (progress) => {
+        if (progress.lengthComputable) {
+          console.log(
+            "环境贴图加载进度:",
+            (progress.loaded / progress.total) * 100 + "%"
+          );
+        }
+      },
+      (error) => {
+        console.error("环境贴图加载失败:", error);
+        // 如果加载失败，使用场景的环境贴图作为备用
+        if (this.scene.environment) {
+          material.envMap = this.scene.environment;
+          material.envMapIntensity = 3.2;
+          material.needsUpdate = true;
+          console.log("使用场景环境贴图作为备用");
+        }
+      }
+    );
+  }
+
+  /**
+   * 为建筑模型添加探照灯光和点光源，模拟玻璃光照效果
+   * @param {THREE.Object3D} buildingModel 建筑模型
+   */
+  addBuildingLighting(buildingModel) {
+    if (!buildingModel) return;
+
+    // 计算建筑的包围盒
+    const box = new THREE.Box3();
+    box.setFromObject(buildingModel);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+
+    // 建筑的高度和半径
+    const buildingHeight = size.y;
+    const buildingRadius = Math.max(size.x, size.z) / 2;
+
+    // 创建灯光组
+    this.buildingLights = new THREE.Group();
+    this.buildingLights.name = "buildingLights";
+
+    // 1. 添加探照灯光（从四个角落照射）
+    const spotLightPositions = [
+      {
+        x: center.x - buildingRadius * 2,
+        y: center.y + buildingHeight * 0.8,
+        z: center.z - buildingRadius * 2,
+      },
+      {
+        x: center.x + buildingRadius * 2,
+        y: center.y + buildingHeight * 0.8,
+        z: center.z - buildingRadius * 2,
+      },
+      {
+        x: center.x - buildingRadius * 2,
+        y: center.y + buildingHeight * 0.8,
+        z: center.z + buildingRadius * 2,
+      },
+      {
+        x: center.x + buildingRadius * 2,
+        y: center.y + buildingHeight * 0.8,
+        z: center.z + buildingRadius * 2,
+      },
+    ];
+
+    spotLightPositions.forEach((pos, index) => {
+      // 创建探照灯
+      const spotLight = new THREE.SpotLight(
+        0xffffff,
+        2.0,
+        0,
+        Math.PI / 6,
+        0.3,
+        1
+      );
+      spotLight.position.set(pos.x, pos.y, pos.z);
+      spotLight.target.position.copy(center);
+      // 减少阴影使用以避免纹理单元溢出
+      spotLight.castShadow = index < 2; // 只让前两个探照灯产生阴影
+
+      // 设置阴影参数（降低分辨率以减少纹理使用）
+      if (spotLight.castShadow) {
+        spotLight.shadow.mapSize.width = 512;
+        spotLight.shadow.mapSize.height = 512;
+        spotLight.shadow.camera.near = 1;
+        spotLight.shadow.camera.far = 1000;
+        spotLight.shadow.camera.fov = 30;
+      }
+
+      // 添加到灯光组
+      this.buildingLights.add(spotLight);
+      this.buildingLights.add(spotLight.target);
+
+      // 创建探照灯辅助器（可选，用于调试）
+      // const spotLightHelper = new THREE.SpotLightHelper(spotLight, 0xffffff);
+      // this.buildingLights.add(spotLightHelper);
+
+      console.log(`添加探照灯 ${index + 1} 位置:`, pos);
+    });
+
+    // 2. 添加点光源（围绕建筑底部）
+    const pointLightCount = 8;
+    for (let i = 0; i < pointLightCount; i++) {
+      const angle = (i / pointLightCount) * Math.PI * 2;
+      const radius = buildingRadius * 1.5;
+
+      const pointLight = new THREE.PointLight(0x4a90e2, 1.5, 100, 2);
+      pointLight.position.set(
+        center.x + Math.cos(angle) * radius,
+        center.y + buildingHeight * 0.2,
+        center.z + Math.sin(angle) * radius
+      );
+      // 减少点光源阴影以避免纹理单元溢出
+      pointLight.castShadow = i < 4; // 只让前4个点光源产生阴影
+
+      // 设置阴影参数（降低分辨率以减少纹理使用）
+      if (pointLight.castShadow) {
+        pointLight.shadow.mapSize.width = 256;
+        pointLight.shadow.mapSize.height = 256;
+        pointLight.shadow.camera.near = 1;
+        pointLight.shadow.camera.far = 200;
+      }
+
+      this.buildingLights.add(pointLight);
+
+      console.log(`添加点光源 ${i + 1} 角度: ${angle.toFixed(2)}`);
+    }
+
+    // 3. 添加顶部聚光灯（从上方照射）
+    const topSpotLight = new THREE.SpotLight(
+      0xffffff,
+      3.0,
+      0,
+      Math.PI / 4,
+      0.2,
+      1
+    );
+    topSpotLight.position.set(
+      center.x,
+      center.y + buildingHeight * 1.5,
+      center.z
+    );
+    topSpotLight.target.position.copy(center);
+    // 顶部聚光灯不产生阴影以避免纹理单元溢出
+    topSpotLight.castShadow = false;
+
+    // 设置阴影参数（如果需要阴影，降低分辨率）
+    if (topSpotLight.castShadow) {
+      topSpotLight.shadow.mapSize.width = 512;
+      topSpotLight.shadow.mapSize.height = 512;
+      topSpotLight.shadow.camera.near = 1;
+      topSpotLight.shadow.camera.far = 1000;
+      topSpotLight.shadow.camera.fov = 45;
+    }
+
+    this.buildingLights.add(topSpotLight);
+    this.buildingLights.add(topSpotLight.target);
+
+    // 创建顶部聚光灯辅助器
+    // const topSpotLightHelper = new THREE.SpotLightHelper(
+    //   topSpotLight,
+    //   0xffffff
+    // );
+    // this.buildingLights.add(topSpotLightHelper);
+
+    // 4. 添加环境补光（柔和的环境光）
+    const ambientFill = new THREE.AmbientLight(0x404040, 0.3);
+    this.buildingLights.add(ambientFill);
+
+    // 将灯光组添加到场景
+    this.scene.add(this.buildingLights);
+
+    console.log(
+      `为建筑模型添加了 ${spotLightPositions.length} 个探照灯、${pointLightCount} 个点光源和 1 个顶部聚光灯`
+    );
   }
 
   /**
@@ -973,6 +1217,12 @@ string} name
     this.addEventListener(); // 搜索楼栋的时候可以正常进入建筑内部
   }
   boardClick = (board) => {
+    // 检查board是否存在且有position属性
+    if (!board || !board.position) {
+      console.warn("boardClick: board对象不存在或缺少position属性", board);
+      return;
+    }
+
     const offset = new THREE.Vector3(2, 2, 0);
     this.tweenControl.lerpTo(board.position, 20, 1000, offset);
   };
@@ -1034,6 +1284,9 @@ string} name
 
     // 清理环境贴图资源
     this.clearEnvironment();
+
+    // 清理建筑灯光
+    this.clearBuildingLights();
 
     console.log("离开地面广场系统");
   }
@@ -1151,12 +1404,12 @@ string} name
     return group;
   }
   resetCamera(duration = 1000, fromOnLoaded = false) {
-    if (!this.groundMesh) {
+    if (!this.cameraResetModel) {
       console.warn("地面模型未加载，无法重置相机");
       return Promise.resolve();
     }
 
-    const { radius, center } = getBoxCenter(this.groundMesh);
+    const { radius, center } = getBoxCenter(this.cameraResetModel);
     center.y += radius * 0.24;
 
     const finalCameraPosition = new THREE.Vector3(
@@ -1312,6 +1565,9 @@ string} name
 
     // 清理环境贴图资源
     this.clearEnvironment();
+
+    // 清理建筑灯光
+    this.clearBuildingLights();
   }
 
   /**
@@ -1329,6 +1585,128 @@ string} name
   }
 
   /**
+   * 清理建筑灯光资源
+   */
+  clearBuildingLights() {
+    if (this.buildingLights) {
+      // 遍历灯光组中的所有灯光，清理资源
+      this.buildingLights.traverse((child) => {
+        if (child.isLight) {
+          // 清理阴影贴图
+          if (child.shadow && child.shadow.map) {
+            child.shadow.map.dispose();
+            child.shadow.map = null;
+          }
+          // 清理灯光
+          child.dispose();
+        }
+      });
+
+      // 从场景中移除灯光组
+      this.scene.remove(this.buildingLights);
+      this.buildingLights = null;
+
+      console.log("建筑灯光资源已清理");
+    }
+  }
+
+  /**
+   * 切换建筑灯光的显示/隐藏
+   * @param {boolean} visible 是否显示灯光
+   */
+  toggleBuildingLights(visible = true) {
+    if (this.buildingLights) {
+      this.buildingLights.visible = visible;
+      console.log(`建筑灯光已${visible ? "开启" : "关闭"}`);
+    }
+  }
+
+  /**
+   * 调整建筑灯光强度
+   * @param {number} intensity 灯光强度倍数 (0.1 - 3.0)
+   */
+  adjustBuildingLightIntensity(intensity = 1.0) {
+    if (this.buildingLights) {
+      this.buildingLights.traverse((child) => {
+        if (child.isLight) {
+          child.intensity *= intensity;
+        }
+      });
+      console.log(`建筑灯光强度已调整为 ${intensity} 倍`);
+    }
+  }
+
+  /**
+   * 优化材质纹理使用，避免纹理单元溢出
+   * @param {THREE.Material} material 材质对象
+   */
+  optimizeMaterialTextures(material) {
+    if (!material) return;
+
+    // 移除不必要的纹理属性以减少纹理单元使用
+    const textureProperties = [
+      "normalMap",
+      "roughnessMap",
+      "metalnessMap",
+      "emissiveMap",
+      "aoMap",
+      "displacementMap",
+      "lightMap",
+      "envMapIntensity",
+    ];
+
+    textureProperties.forEach((prop) => {
+      if (material[prop] && !material[prop].isTexture) {
+        delete material[prop];
+      }
+    });
+
+    // 确保只保留必要的纹理
+    if (material.map && !material.map.isTexture) {
+      delete material.map;
+    }
+
+    // 设置材质为不需要更新纹理
+    material.needsUpdate = true;
+  }
+
+  /**
+   * 创建简化的玻璃材质（用于纹理单元溢出时的备用方案）
+   * @param {THREE.Material} originalMaterial 原始材质
+   */
+  createSimpleGlassMaterial(originalMaterial) {
+    // 保存原始颜色和透明度
+    const originalColor = originalMaterial.color
+      ? originalMaterial.color.clone()
+      : new THREE.Color(0xffffff);
+    const originalOpacity =
+      originalMaterial.opacity !== undefined ? originalMaterial.opacity : 1.0;
+
+    // 创建简化的玻璃材质
+    const simpleGlassMaterial = new THREE.MeshStandardMaterial({
+      color: originalColor,
+      opacity: originalOpacity,
+      transparent: true,
+      metalness: 0.0,
+      roughness: 0.1, // 稍微粗糙以模拟玻璃
+      side: THREE.DoubleSide,
+      depthTest: true,
+      depthWrite: false,
+    });
+
+    // 设置环境贴图（如果场景环境贴图存在）
+    if (this.scene.environment) {
+      simpleGlassMaterial.envMap = this.scene.environment;
+      simpleGlassMaterial.envMapIntensity = 1.0;
+    }
+
+    console.log(
+      `为材质 ${originalMaterial.name || "bbll"} 创建简化玻璃材质（备用方案）`
+    );
+    return simpleGlassMaterial;
+  }
+
+  /**
    * 设置环境效果
    * @param {string} type - 环境类型: 'room', 'hdr', 'default'
    * @param {Object} options - 配置选项
@@ -1343,15 +1721,15 @@ string} name
         const pmremGenerator = new THREE.PMREMGenerator(this.core.renderer);
         this.scene.environment = pmremGenerator.fromScene(
           new RoomEnvironment(),
-          0.24
+          0.8
         ).texture;
-        this.scene.background = SunnyTexture;
+        // this.scene.background = SunnyTexture;
         console.log("已设置 RoomEnvironment");
         break;
 
       case "hdr":
         // 使用 HDR 环境贴图
-        this.setHDRSky();
+        // this.setHDRSky();
         break;
 
       case "default":
